@@ -38,3 +38,13 @@ python -m venv .origin
 .\.origin\Scripts\activate
 pip install fastapi uvicorn rasterio shapely opencv-python torch torchvision scikit-learn pandas netCDF4 Pillow earthengine-api
 earthengine authenticate
+
+
+# STAGE 2 : OCEANOGRAPHIC AND METEOROLOGICAL DATA + HINDCASTING/FORECASTING 
+
+1. Environment Installation
+OpenDrift relies on a few robust geospatial and scientific libraries to run fluid dynamics and handle .nc (NetCDF) data. In your VS Code terminal, ensure your virtual environment (.origin) is active and run:
+
+pip install opendrift netCDF4 xarray dask
+
+pip install matplotlib pyproj
