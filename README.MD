@@ -1,50 +1,81 @@
-# 1. Create Backend Folders
-mkdir -p aquavision-backend/app/api, aquavision-backend/app/core, aquavision-backend/app/ml/sar, `
-         aquavision-backend/app/ml/metocean, aquavision-backend/app/ml/ais, `
-         aquavision-backend/app/ml/attribution, aquavision-backend/app/schemas, `
-         aquavision-backend/data, aquavision-backend/models, aquavision-backend/static/overlays
+# AquaVision: Autonomous Maritime Surveillance & Oil Spill Attribution Pipeline
 
-# 2. Create Backend Blank Files
-New-Item -ItemType File -Force -Path `
-  "aquavision-backend/app/__init__.py", "aquavision-backend/app/api/__init__.py", "aquavision-backend/app/api/routes.py", `
-  "aquavision-backend/app/core/__init__.py", "aquavision-backend/app/core/config.py", `
-  "aquavision-backend/app/ml/__init__.py", `
-  "aquavision-backend/app/ml/sar/__init__.py", "aquavision-backend/app/ml/sar/sentinel_service.py", "aquavision-backend/app/ml/sar/processor.py", `
-  "aquavision-backend/app/ml/metocean/__init__.py", "aquavision-backend/app/ml/metocean/hindcast_engine.py", `
-  "aquavision-backend/app/ml/ais/__init__.py", "aquavision-backend/app/ml/ais/ais_anomaly.py", `
-  "aquavision-backend/app/ml/attribution/__init__.py", "aquavision-backend/app/ml/attribution/scorer.py", `
-  "aquavision-backend/app/schemas/__init__.py", "aquavision-backend/app/schemas/payload.py", `
-  "aquavision-backend/main.py", "aquavision-backend/requirements.txt"
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![React](https://img.shields.io/badge/React-Vite-cyan.svg)](https://react.dev/)
+[![OpenDrift](https://img.shields.io/badge/Engine-OpenDrift%20OpenOil-orange.svg)](https://opendrift.github.io/)
+[![Status](https://img.shields.io/badge/Status-Production%20Ready-green.svg)]()
 
-# 3. Create Frontend Scaffold and Component Files
-npm create vite@latest aquavision-frontend -- --template react -y
-mkdir -p aquavision-frontend/src/api, aquavision-frontend/src/components
-New-Item -ItemType File -Force -Path `
-  "aquavision-frontend/src/api/client.js", `
-  "aquavision-frontend/src/components/MapViewer.jsx", `
-  "aquavision-frontend/src/components/SpillSummary.jsx", `
-  "aquavision-frontend/src/components/CulpritLeaderboard.jsx", `
-  "aquavision-frontend/src/components/MetoceanSimulator.jsx", `
-  "aquavision-frontend/src/components/AnalyticsModal.jsx"
+> **AquaVision** is an end-to-end operational intelligence platform designed to detect offshore oil spills from space, reconstruct their trajectory using real-world metocean physics, and scientifically attribute the spill to the responsible vessel using machine learning and historical AIS (Automatic Identification System) tracking data.
 
+---
+
+##  Platform Preview & Prototype
+*Note: The dashboard combines spatial intelligence, fluid dynamics simulation, and multi-criteria vessel attribution into a single professional command center.*
+
+| **Spill Detection & SAR Intelligence** | **Metocean Hindcast Particle Simulation** |
+| :-----------------------------------: | :-------------------------------------: |
+| ![Spill Intelligence](assets/spill_summary.jpg) | ![Metocean Simulation](assets/wakashio.jpg) |   
+| *Automated Sentinel-1 SAR anomaly extraction and metric profiling.* | *Physics-driven backward drift tracking via live Open-Meteo & OpenOil vectors.* |
+
+---
+
+## Core Architecture & 3-Stage Pipeline
+
+AquaVision eliminates synthetic data dependencies by relying strictly on live APIs and real-world kinematic modeling across three sequential stages:
+
+### 1. Stage 1: Satellite SAR Processing & Spill Detection
+* **Data Source:** Google Earth Engine & Sentinel-1 SAR imagery.
+* **Functionality:** Extracts radar backscatter anomalies to segment oil slicks from open water. Computes surface area, perimeter dimensions, form-factor complexity, and precise geographic centroids.
+
+### 2. Stage 2: Dynamic Metocean Hindcast Simulation
+* **Data Source:** Live historical weather data via the **Open-Meteo Archive API** and native **OpenDrift / OpenOil** fluid mechanics.
+* **Functionality:** Dynamically queries real-world wind speeds, directions, and ocean currents for the exact incident date and location. Seeds fluid oil particles and runs a backward-in-time ($ -24\text{h} $) hindcast simulation incorporating turbulent mixing and spreading to locate the exact origin zone.
+
+### 3. Stage 3: AIS Traffic Intelligence & Multi-Criteria Attribution
+* **Data Source:** Regional historical AIS tracking records.
+* **Functionality:** Ingests surrounding maritime traffic and filters out background noise using an unsupervised **Isolation Forest** model to detect behavioral anomalies (e.g., erratic course changes, unexpected stalls). Evaluates suspects using a rigorous **6-Factor Weighted Scoring Matrix**:
+  * **35%** Spatial Proximity to Origin
+  * **20%** Hindcast Trajectory Intersection
+  * **15%** Trajectory Alignment
+  * **15%** Behavioral Anomalies (Isolation Forest)
+  * **10%** Temporal Proximity Window
+  * **5%** Vessel Characteristics (Tanker/Cargo Risk weighting)
+
+---
+
+## UI
+* **Top 3 Suspect Leaderboard:** Instantly filters out hundreds of irrelevant vessels to present a concise, ranked threat list categorized into strict risk tiers (**Red** for probable suspects, **Orange** for behavioral anomalies, and **Green** for cleared safe traffic).
+* **MarineTraffic-Style Intelligence Popups:** Clicking any vessel node on the Leaflet map opens a detailed tactical profile displaying MMSI, vessel type, speed, course, and score breakdown.
+* **Time-Stepped Simulation Slider:** Enables analysts to play back or scrub through the chronological drift of the oil slick from its origin point to the detection site.
+
+---
+
+## Local Installation & Quick Start
+
+### Prerequisites
+* Python 3.11+
+* Node.js & npm
+
+### 1. Backend Setup (FastAPI & OpenDrift Engine)
+```bash
+cd aquavision-backend
+# Install python dependencies (including pre-compiled Windows geospatial wheels)
+pip install -r requirements.txt # or install opendrift netCDF4 xarray dask pyproj matplotlib
+# Launch the FastAPI server
+uvicorn main:app --port 8000 --reload
+
+### 2. Frontend Setup (ReactJS)
 
 cd aquavision-frontend
+# Install dependencies
 npm install
-npm install leaflet react-leaflet axios lucide-react
-npm install -D tailwindcss @tailwindcss/postcss postcss autoprefixer
-
-cd C:\Users\geeth\Downloads\AquaVision\aquavision-backend
-python -m venv .origin
-.\.origin\Scripts\activate
-pip install fastapi uvicorn rasterio shapely opencv-python torch torchvision scikit-learn pandas netCDF4 Pillow earthengine-api
-earthengine authenticate
+# Launch the development server
+npm run dev
 
 
-# STAGE 2 : OCEANOGRAPHIC AND METEOROLOGICAL DATA + HINDCASTING/FORECASTING 
+### Tech Stack
+Backend: Python, FastAPI, NumPy, Pandas, Scikit-Learn (Isolation Forest), Requests.
 
-1. Environment Installation
-OpenDrift relies on a few robust geospatial and scientific libraries to run fluid dynamics and handle .nc (NetCDF) data. In your VS Code terminal, ensure your virtual environment (.origin) is active and run:
+Physics & Geospatial: OpenDrift (OpenOil), Pyproj, Open-Meteo Historical Archive API.
 
-pip install opendrift netCDF4 xarray dask
-
-pip install matplotlib pyproj
+Frontend: React, Vite, Tailwind CSS, Leaflet / React-Leaflet, Lucide Icons.
