@@ -14,7 +14,7 @@
 
 | **Spill Detection & SAR Intelligence** | **Metocean Hindcast Particle Simulation** |
 | :-----------------------------------: | :-------------------------------------: |
-| ![Spill Intelligence](assets/spill_summary.jpg) | ![Metocean Simulation](assets/wakashio.jpg) |   
+| ![Spill Intelligence](assets/spill_summary.jpeg) | ![Metocean Simulation](assets/wakashio.jpeg) |   
 | *Automated Sentinel-1 SAR anomaly extraction and metric profiling.* | *Physics-driven backward drift tracking via live Open-Meteo & OpenOil vectors.* |
 
 ---
@@ -57,25 +57,36 @@ AquaVision eliminates synthetic data dependencies by relying strictly on live AP
 * Node.js & npm
 
 ### 1. Backend Setup (FastAPI & OpenDrift Engine)
+
 ```bash
 cd aquavision-backend
-# Install python dependencies (including pre-compiled Windows geospatial wheels)
-pip install -r requirements.txt # or install opendrift netCDF4 xarray dask pyproj matplotlib
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Alternatively, install the core dependencies manually:
+# pip install opendrift netCDF4 xarray dask pyproj matplotlib
+
 # Launch the FastAPI server
 uvicorn main:app --port 8000 --reload
+```
 
 ### 2. Frontend Setup (ReactJS)
 
+```bash
 cd aquavision-frontend
+
 # Install dependencies
 npm install
+
 # Launch the development server
 npm run dev
-
+```
 
 ### Tech Stack
-Backend: Python, FastAPI, NumPy, Pandas, Scikit-Learn (Isolation Forest), Requests.
 
-Physics & Geospatial: OpenDrift (OpenOil), Pyproj, Open-Meteo Historical Archive API.
+**Backend:** Python, FastAPI, NumPy, Pandas, Scikit-Learn (Isolation Forest), Requests.
 
-Frontend: React, Vite, Tailwind CSS, Leaflet / React-Leaflet, Lucide Icons.
+**Physics & Geospatial:** OpenDrift (OpenOil), PyProj, Open-Meteo Historical Archive API.
+
+**Frontend:** React, Vite, Tailwind CSS, Leaflet / React-Leaflet, Lucide Icons.
