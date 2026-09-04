@@ -14,6 +14,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [activeStep, setActiveStep] = useState(0);
 
   // Initialized to empty strings so the map is blank on load
   const [lat, setLat] = useState('');
@@ -23,6 +24,7 @@ export default function App() {
   const executePipeline = async () => {
     setLoading(true);
     setError(null);
+    setActiveStep(0); // Reset animation step on new query
     try {
       const result = await runFullInvestigation(lat, lon, targetDate || null);
       setData(result);
@@ -40,6 +42,8 @@ export default function App() {
     setTargetDate('');
     setData(null);
     setError(null);
+    setActiveStep(0);
+    setSelectedVessel(null);
   };
 
   const handleMapClick = (clickedLat, clickedLon) => {
@@ -121,8 +125,17 @@ export default function App() {
         {data && (
           <div className="flex-1 flex flex-col min-h-0">
             {activeTab === 'overview' ? (
-              <><SpillSummary detection={data.detection} onOpenDiagnostics={() => setIsModalOpen(true)} /><CulpritLeaderboard suspects={data.suspect_ranking} /></>
-            ) : (<MetoceanSimulator hindcastData={data.metocean_hindcast} />)}
+              <>
+                <SpillSummary detection={data.detection} onOpenDiagnostics={() => setIsModalOpen(true)} />
+                <CulpritLeaderboard suspects={data.suspect_ranking} onSelectVessel={setSelectedVessel} />
+              </>
+            ) : (
+              <MetoceanSimulator 
+                hindcastData={data.metocean_hindcast} 
+                activeStep={activeStep} 
+                setActiveStep={setActiveStep} 
+              />
+            )}
           </div>
         )}
       </div>
@@ -132,6 +145,10 @@ export default function App() {
           targetLat={lat}
           targetLon={lon}
           detection={data?.detection}
+          metocean={data?.metocean_hindcast}
+          suspects={data?.suspect_ranking}
+          activeStep={activeStep}
+          selectedVessel={selectedVessel}
           onLocationSelect={handleMapClick}
         />
       </div>

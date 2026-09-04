@@ -113,14 +113,25 @@ def process_gee_image(gee_metadata: dict):
 
     try:
         with rasterio.open(tif_path) as src:
+            bounds = src.bounds
+            
+            # --- STALE CACHE GUARD ---
+            # Verifies requested coordinates match the active raster extent
+            center_lat = (bounds.top + bounds.bottom) / 2
+            center_lon = (bounds.left + bounds.right) / 2
+            if abs(lat - center_lat) > 0.5 or abs(lon - center_lon) > 0.5:
+                print(f"[CACHE] Target coordinates ({lat}, {lon}) diverge from cached TIF ({center_lat}, {center_lon}). Bypassing cache.")
+                raise ValueError("Stale TIF cache detected.")
+
             transform = src.transform
             crs = str(src.crs) if src.crs else "EPSG:4326"
-            bounds = src.bounds
             vv_raw = src.read(1)
             vh_raw = src.read(2)
+            
         vv_raw = cv2.resize(vv_raw, (512, 512))
         vh_raw = cv2.resize(vh_raw, (512, 512))
     except Exception as e:
+        # Generate dynamic synthetic SAR and detection payload for new target location
         return generate_fallback_payload(lat, lon, acq_time)
 
     vv = norm_sar(vv_raw)

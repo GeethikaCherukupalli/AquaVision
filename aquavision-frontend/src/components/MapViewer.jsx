@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polygon, Polyline, ZoomControl, useMap, useMapEvents } from 'react-leaflet';
-import { Search, MapPin, Hexagon, Ruler, Layers, CheckCircle, Trash2 } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup, Polygon, Polyline, CircleMarker, ZoomControl, useMap, useMapEvents } from 'react-leaflet';
+import { Search, MapPin, Hexagon, Ruler, Layers, CheckCircle, Trash2, Anchor, AlertTriangle, ShieldAlert, ShieldCheck } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -58,13 +58,12 @@ function ClickHandler({ onMapClick, activeTool }) {
   return null;
 }
 
-export default function MapViewer({ targetLat, targetLon, detection, onLocationSelect }) {
+export default function MapViewer({ targetLat, targetLon, detection, metocean, suspects, activeStep, onLocationSelect }) {
   const [activeTool, setActiveTool] = useState('point'); 
   const [searchQuery, setSearchQuery] = useState('');
   const [draftPolygon, setDraftPolygon] = useState([]);
   const [perimeterKm, setPerimeterKm] = useState(0);
 
-  // Safely handle empty strings on load by providing a default center
   const activeCenter = detection?.spatial_features?.centroid
     ? [detection.spatial_features.centroid.latitude, detection.spatial_features.centroid.longitude]
     : (targetLat !== '' && targetLon !== '' ? [targetLat, targetLon] : [25.0, -90.0]);
@@ -132,12 +131,10 @@ export default function MapViewer({ targetLat, targetLon, detection, onLocationS
           bounds={[[-90, -180], [90, 180]]}
         />
 
-        {/* Standard Point Selection - Only render if coordinates are valid numbers */}
         {activeTool === 'point' && draftPolygon.length === 0 && targetLat !== '' && targetLon !== '' && (
           <Marker position={[targetLat, targetLon]} icon={targetIcon} />
         )}
 
-        {/* Interactive Polygon Drawing */}
         {draftPolygon.map((pos, idx) => <Marker key={idx} position={pos} icon={vertexIcon} />)}
         
         {draftPolygon.length === 2 && (
@@ -151,25 +148,77 @@ export default function MapViewer({ targetLat, targetLon, detection, onLocationS
           />
         )}
 
-        {/* AI Detection Polygon (From Backend) */}
         {detection?.spatial_features?.geometry_geojson && (
           <Polygon
             positions={detection.spatial_features.geometry_geojson.coordinates[0].map((c) => [c[1], c[0]])}
             pathOptions={{ color: '#f43f5e', fillColor: '#e11d48', fillOpacity: 0.65, weight: 2 }}
           />
         )}
-      </MapContainer>
 
-      {/* Instructional HUD */}
-      <div className="absolute top-4 left-4 bg-slate-900/95 border border-slate-700 rounded p-3 z-[1000] text-xs shadow-xl text-slate-200 w-72">
-        <div className="flex items-center gap-2 mb-1.5 border-b border-slate-700/50 pb-1.5">
-          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-          <span className="font-semibold text-slate-300 uppercase tracking-wide text-[10px]">Copernicus GEE Link</span>
-        </div>
-        <p className="text-slate-400 text-[11px] leading-relaxed mb-2">
-          Use the right toolbar to search a location, drop a target point, or draw an Area of Interest (AOI).
-        </p>
-      </div>
+        {/* ---> FLUID OPENDRIFT OIL SLICK ANIMATION <--- */}
+        {metocean?.hindcast_trajectory && metocean?.origin_estimate && (
+          <>
+            {metocean.hindcast_trajectory[activeStep || 0]?.particles?.map((p, idx) => (
+              <CircleMarker 
+                key={`particle-${idx}`} 
+                center={[p.lat, p.lon]} 
+                radius={9}
+                pathOptions={{
+                  color: 'transparent',
+                  fillColor: '#f59e0b',
+                  fillOpacity: 0.3,
+                  weight: 0
+                }}
+              />
+            ))}
+
+            <Marker 
+              position={[metocean.origin_estimate.latitude, metocean.origin_estimate.longitude]} 
+              icon={new L.DivIcon({
+                className: 'origin-node',
+                html: `<div style="background-color: #ef4444; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px #ef4444;"></div>`,
+                iconSize: [14, 14],
+              })} 
+            >
+              <Popup className="text-xs font-mono font-bold text-slate-800">
+                Calculated 24-Hr Origin Zone
+              </Popup>
+            </Marker>
+          </>
+        )}
+
+        {/* ---> STAGE 3: AIS SUSPECT VESSELS (Top 3 Filtered Traffic) <--- */}
+        {suspects && suspects.map((vessel) => {
+          const pinColor = vessel.risk_tier === 'red' ? '#ef4444' : vessel.risk_tier === 'yellow' ? '#f59e0b' : '#10b981';
+          const vesselIcon = new L.DivIcon({
+            className: 'vessel-pin',
+            html: `<div style="background-color: ${pinColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px ${pinColor}; display: flex; align-items: center; justify-content: center;"><div style="width: 4px; height: 4px; background: white; border-radius: 50%;"></div></div>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
+          });
+
+          return (
+            <Marker key={vessel.mmsi} position={[vessel.latitude, vessel.longitude]} icon={vesselIcon}>
+              <Popup className="custom-vessel-popup">
+                <div className="p-2 font-sans text-slate-900 w-52">
+                  <div className="flex items-center justify-between border-b pb-1 mb-2">
+                    <span className="font-bold text-xs uppercase tracking-wide">{vessel.name}</span>
+                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: pinColor }}>
+                      {vessel.risk_tier.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-[11px] font-mono text-slate-600">
+                    <div>Type: <span className="font-semibold text-slate-900">{vessel.vessel_type}</span></div>
+                    <div>MMSI: <span className="font-semibold text-slate-900">{vessel.mmsi}</span></div>
+                    <div>Speed: <span className="font-semibold text-slate-900">{vessel.speed} kts</span></div>
+                    <div>Score: <span className="font-semibold text-cyan-600">{vessel.composite_score}/100</span></div>
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+      </MapContainer>
 
       {/* Measurement Tooltip */}
       {activeTool === 'polygon' && draftPolygon.length > 1 && (
@@ -193,9 +242,19 @@ export default function MapViewer({ targetLat, targetLon, detection, onLocationS
         </div>
       )}
 
-      {/* Top Right Toolbar (Enlarged) */}
+      {/* Instructional HUD */}
+      <div className="absolute top-4 left-4 bg-slate-900/95 border border-slate-700 rounded p-3 z-[1000] text-xs shadow-xl text-slate-200 w-72 pointer-events-none">
+        <div className="flex items-center gap-2 mb-1.5 border-b border-slate-700/50 pb-1.5">
+          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+          <span className="font-semibold text-slate-300 uppercase tracking-wide text-[10px]">Copernicus GEE Link</span>
+        </div>
+        <p className="text-slate-400 text-[11px] leading-relaxed mb-2">
+          Use the right toolbar to search a location, drop a target point, or draw an Area of Interest (AOI).
+        </p>
+      </div>
+
+      {/* Top Right Toolbar */}
       <div className="absolute top-4 right-4 z-[1000] flex flex-col items-end gap-3">
-        {/* Search Bar */}
         <div className="bg-slate-900 border border-slate-700 rounded-lg shadow-xl flex items-center p-3">
           <Search className="w-5 h-5 text-slate-400 mr-2" />
           <input 
@@ -208,7 +267,6 @@ export default function MapViewer({ targetLat, targetLon, detection, onLocationS
           />
         </div>
 
-        {/* Tools */}
         <div className="bg-slate-900 border border-slate-700 rounded-lg shadow-xl flex flex-col w-12 overflow-hidden">
           <button onClick={() => { setActiveTool('point'); setDraftPolygon([]); }} title="Point Selection" className={`p-3 transition-colors border-b border-slate-800 ${activeTool === 'point' ? 'bg-blue-600/20 border-l-2 border-l-blue-500 text-blue-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}>
             <MapPin className="w-5 h-5 mx-auto" />
