@@ -14,8 +14,8 @@
 
 | **Spill Detection & SAR Intelligence** | **Metocean Hindcast Particle Simulation** |
 | :-----------------------------------: | :-------------------------------------: |
-| ![Spill Intelligence](assets/spill_summary.jpeg) | ![Metocean Simulation](assets/wakashio.jpeg) |   
-| *Automated Sentinel-1 SAR anomaly extraction and metric profiling.* | *Physics-driven backward drift tracking via live Open-Meteo & OpenOil vectors.* |
+| ![Wakahio Oil Spill - SAR images](assets/spill_summary.jpeg) | ![Prototype](assets/wakashio.jpeg) |   
+| *Sentinel-1 SAR anomaly extraction and metric profiling.* | *Interface showing the highlighted oil spill region and the most likely vessel responsible for it.* |
 
 ---
 
