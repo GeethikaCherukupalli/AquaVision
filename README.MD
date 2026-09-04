@@ -12,7 +12,7 @@
 ##  Platform Preview & Prototype
 *Note: The dashboard combines spatial intelligence, fluid dynamics simulation, and multi-criteria vessel attribution into a single professional command center.*
 
-| **Spill Detection & SAR Intelligence** | **Metocean Hindcast Particle Simulation** |
+| **SAR Spill variations** | **Prototype(Interface)** |
 | :-----------------------------------: | :-------------------------------------: |
 | ![Wakahio Oil Spill - SAR images](assets/spill_summary.jpeg) | ![Prototype](assets/wakashio.jpeg) |   
 | *Sentinel-1 SAR anomaly extraction and metric profiling.* | *Interface showing the highlighted oil spill region and the most likely vessel responsible for it.* |
