@@ -1,0 +1,70 @@
+# Colab-specific configuration
+# Copy this to /content/drive/MyDrive/oil_spill/stage1_config.yaml
+
+dataset:
+  dataset_root: "/content/drive/MyDrive/oil_spill"
+  patch_size: 512
+  oil_fraction_threshold: 0.01
+  scene_size: 2048
+  image_channels: 2
+  image_dtype: "float32"
+  mask_dtype: "uint8"
+  part1_dir: "Part1"
+  part2_dir: "Part2"
+  part3_dir: "Part3"
+  train_split: 0.80
+  validation_split: 0.10
+  test_split: 0.10
+  random_seed: 42
+
+normalization:
+  vv_mean: null
+  vv_std: null
+  vh_mean: null
+  vh_std: null
+  compute_from_training: true
+
+resnet:
+  input_channels: 2
+  input_size: 512
+  pretrained: true
+  classifier_threshold: 0.12
+  batch_size: 8
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  epochs: 15
+  random_seed: 42
+  num_workers: 2
+  mixed_precision: true
+  positive_class_weight: null
+  scheduler_factor: 0.5
+  scheduler_patience: 2
+  checkpoint_dir: "/content/drive/MyDrive/oil_spill/artifacts/resnet18"
+
+unet:
+  input_channels: 2
+  input_size: 512
+  output_channels: 1
+  base_channels: 32
+  segmentation_threshold: 0.5
+  batch_size: 4
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  epochs: 15
+  random_seed: 42
+  num_workers: 2
+  mixed_precision: true
+  checkpoint_dir: "/content/drive/MyDrive/oil_spill/artifacts/unet"
+
+inference:
+  patch_size: 512
+  classifier_threshold: 0.12
+  segmentation_threshold: 0.5
+  min_component_size: 32
+  max_component_size: null
+  use_morphology: true
+  morphology_kernel_size: 3
+  output_dir: "/content/drive/MyDrive/oil_spill/artifacts/inference"
+  device: "auto"
+
+random_seed: 42
