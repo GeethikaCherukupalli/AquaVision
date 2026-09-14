@@ -1,34 +1,38 @@
 # -*- coding: utf-8 -*-
-"""Dataset indexing for Sentinel-1 oil spill dataset."""
+"""Dataset indexing for Sentinel-1 oil spill dataset.
+
+The AquaVision dataset has three distinct parts:
+
+Part1:
+    Oil images + corresponding oil masks.
+    Used for train/validation.
+
+Part2:
+    No-oil and lookalike images + corresponding masks.
+    Used for train/validation.
+
+Part3:
+    Official held-out test set with ground-truth masks.
+    NEVER used for training, validation, or threshold tuning.
+"""
 
 from __future__ import annotations
 
-import csv
 import json
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import List, Optional
+
+import rasterio
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SceneIndexItem:
-    """Index entry for a single scene.
-
-    Parameters
-    ----------
-    scene_id : str
-        Unique identifier for the scene.
-    image_path : str
-        Path to the SAR image TIFF.
-    mask_path : Optional[str]
-        Path to the corresponding segmentation mask TIFF.
-    split : str
-        Split label: train, validation, or test.
-    class_label : Optional[str]
-        Class label: oil, no_oil, or lookalike.
-    part : Optional[str]
-        Dataset part: Part1, Part2, or Part3.
-    """
+    """Index entry for a single SAR scene."""
 
     scene_id: str
     image_path: str
@@ -40,19 +44,23 @@ class SceneIndexItem:
 
 
 class DatasetIndex:
-    """Index dataset scenes and patches.
+    """Index the AquaVision Sentinel-1 oil-spill dataset.
 
-    The index is built lazily from the dataset root. The 90GB dataset is
-    never copied into the repository — only relative paths are stored.
+    Dataset semantics
+    -----------------
+    Part1 + Part2:
+        Training/validation candidates.
 
-    Parameters
-    ----------
-    dataset_root : str or Path
-        Root directory of the dataset.
-    patch_size : int
-        Patch size in pixels.
-    oil_fraction_threshold : float
-        Threshold for labeling patches from oil masks.
+    Part3:
+        Strictly held-out test data.
+
+    Binary ResNet labels:
+        1 = oil
+        0 = not oil (no_oil + lookalike)
+
+    Oil patch labels:
+        Derived from mask oil fraction using
+        ``oil_fraction_threshold``.
     """
 
     def __init__(
@@ -64,173 +72,374 @@ class DatasetIndex:
         self.dataset_root = Path(dataset_root)
         self.patch_size = patch_size
         self.oil_fraction_threshold = oil_fraction_threshold
+
         self.scenes: List[SceneIndexItem] = []
         self.patch_index: List[dict] = []
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def discover_scenes(self) -> List[SceneIndexItem]:
-        """Discover all scenes in the dataset.
+        """Discover scenes using the known Zenodo directory structure.
 
-        The exact nested directory structure inside Part1/Part2/Part3
-        must be inspected rather than guessed. This method performs a
-        conservative scan looking for TIFF image/mask pairs.
+        Part1 and Part2 are marked as ``train`` initially. The existing
+        scene-level splitter can subsequently divide these into train and
+        validation.
 
-        Returns
-        -------
-        list of SceneIndexItem
+        Part3 is ALWAYS marked ``test`` and must remain untouched.
         """
+
         if not self.dataset_root.exists():
             raise FileNotFoundError(
-                f"Dataset root not found: {self.dataset_root}. "
-                "Set AQUAVISION_DATA_ROOT to the correct path."
+                f"Dataset root not found: {self.dataset_root}"
             )
 
+        part1 = self.dataset_root / "Part1"
+        part2 = self.dataset_root / "Part2"
+        part3 = self.dataset_root / "Part3"
+
         scenes: List[SceneIndexItem] = []
-        seen_paths: set = set()
 
-        for image_path in self.dataset_root.rglob("*.tif"):
-            if image_path in seen_paths or not image_path.exists():
-                continue
-            seen_paths.add(image_path)
+        # --------------------------------------------------------------
+        # Part 1: Oil
+        # --------------------------------------------------------------
 
-            # Skip files that are obviously masks (contain "mask" in name)
-            if "mask" in image_path.name.lower():
-                continue
+        part1_images = (
+            part1
+            / "01_Train_Val_Oil_Spill_images"
+            / "Oil"
+        )
 
-            # Try to find a corresponding mask
-            mask_path = self._find_mask(image_path)
-            scene_id = image_path.stem
+        part1_masks = (
+            part1
+            / "01_Train_Val_Oil_Spill_mask"
+            / "Mask_oil"
+        )
 
-            # Determine part and class from path
-            relative = image_path.relative_to(self.dataset_root)
-            parts = relative.parts
-            part = parts[0] if len(parts) > 1 else None
-            class_label = self._infer_class_label(relative)
+        scenes.extend(
+            self._build_paired_scenes(
+                image_dir=part1_images,
+                mask_dir=part1_masks,
+                class_label="oil",
+                part="Part1",
+                split="train",
+                mask_suffix="",
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Part 2: No Oil
+        # --------------------------------------------------------------
+
+        part2_no_oil_images = (
+            part2
+            / "01_Train_Val_No_Oil_Images"
+            / "No_oil"
+        )
+
+        part2_no_oil_masks = (
+            part2
+            / "01_Train_Val_No_Oil_mask"
+            / "Mask_no_oil"
+        )
+
+        scenes.extend(
+            self._build_paired_scenes(
+                image_dir=part2_no_oil_images,
+                mask_dir=part2_no_oil_masks,
+                class_label="no_oil",
+                part="Part2",
+                split="train",
+                mask_suffix="",
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Part 2: Lookalike
+        # --------------------------------------------------------------
+
+        part2_lookalike_images = (
+            part2
+            / "01_Train_Val_Lookalike_images"
+            / "Lookalike"
+        )
+
+        part2_lookalike_masks = (
+            part2
+            / "01_Train_Val_Lookalike_mask"
+            / "Mask_lookalike"
+        )
+
+        scenes.extend(
+            self._build_paired_scenes(
+                image_dir=part2_lookalike_images,
+                mask_dir=part2_lookalike_masks,
+                class_label="lookalike",
+                part="Part2",
+                split="train",
+                mask_suffix="",
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Part 3: HELD-OUT TEST SET
+        # --------------------------------------------------------------
+
+        part3_root = (
+            part3
+            / "02_Test_images_and_ground_truth"
+        )
+
+        part3_images = part3_root / "Images"
+        part3_masks = part3_root / "Mask"
+
+        for class_dir_name, class_label in [
+            ("Oil", "oil"),
+            ("No oil", "no_oil"),
+            ("Lookalike", "lookalike"),
+        ]:
+            image_dir = part3_images / class_dir_name
+            mask_dir = part3_masks / class_dir_name
+
+            scenes.extend(
+                self._build_paired_scenes(
+                    image_dir=image_dir,
+                    mask_dir=mask_dir,
+                    class_label=class_label,
+                    part="Part3",
+                    split="test",
+                    mask_suffix="_segmentation",
+                )
+            )
+
+        # --------------------------------------------------------------
+        # Final validation
+        # --------------------------------------------------------------
+
+        scene_ids = [scene.scene_id for scene in scenes]
+
+        if len(scene_ids) != len(set(scene_ids)):
+            duplicates = sorted(
+                {
+                    scene_id
+                    for scene_id in scene_ids
+                    if scene_ids.count(scene_id) > 1
+                }
+            )
+            raise ValueError(
+                f"Duplicate scene IDs detected: {duplicates}"
+            )
+
+        self.scenes = scenes
+
+        logger.info(
+            "Discovered %d scenes: Part1=%d, Part2=%d, Part3=%d",
+            len(scenes),
+            sum(s.part == "Part1" for s in scenes),
+            sum(s.part == "Part2" for s in scenes),
+            sum(s.part == "Part3" for s in scenes),
+        )
+
+        return scenes
+
+    # ------------------------------------------------------------------
+    # Deterministic directory pairing
+    # ------------------------------------------------------------------
+
+    def _build_paired_scenes(
+        self,
+        image_dir: Path,
+        mask_dir: Path,
+        class_label: str,
+        part: str,
+        split: str,
+        mask_suffix: str = "",
+    ) -> List[SceneIndexItem]:
+        """Build scene entries from matching image/mask IDs.
+
+        Only image-mask pairs are included.
+
+        For Part2 No_oil, the known dataset contains 688 images but
+        only 685 masks. The three unmatched images are explicitly
+        reported and excluded from this paired index rather than being
+        silently assigned an incorrect mask.
+        """
+
+        if not image_dir.exists():
+            raise FileNotFoundError(
+                f"Image directory not found: {image_dir}"
+            )
+
+        if not mask_dir.exists():
+            raise FileNotFoundError(
+                f"Mask directory not found: {mask_dir}"
+            )
+
+        image_files = {
+            path.stem: path
+            for path in image_dir.glob("*.tif")
+        }
+
+        mask_files = {}
+
+        for path in mask_dir.glob("*.tif"):
+            stem = path.stem
+
+            if mask_suffix and stem.endswith(mask_suffix):
+                stem = stem[: -len(mask_suffix)]
+
+            mask_files[stem] = path
+
+        image_ids = set(image_files)
+        mask_ids = set(mask_files)
+
+        missing_masks = sorted(image_ids - mask_ids)
+        orphan_masks = sorted(mask_ids - image_ids)
+
+        if missing_masks:
+            logger.warning(
+                "%s %s: %d images have no matching mask. "
+                "These images will NOT be included in the paired index. "
+                "Missing IDs: %s",
+                part,
+                class_label,
+                len(missing_masks),
+                missing_masks[:20],
+            )
+
+        if orphan_masks:
+            logger.warning(
+                "%s %s: %d masks have no matching image. "
+                "They will be ignored. IDs: %s",
+                part,
+                class_label,
+                len(orphan_masks),
+                orphan_masks[:20],
+            )
+
+        paired_ids = sorted(image_ids & mask_ids)
+
+        scenes: List[SceneIndexItem] = []
+
+        for sample_id in paired_ids:
+            image_path = image_files[sample_id]
+            mask_path = mask_files[sample_id]
+
+            # Include dataset part + class to guarantee uniqueness.
+            scene_id = (
+                f"{part}_{class_label}_{sample_id}"
+            )
 
             scenes.append(
                 SceneIndexItem(
                     scene_id=scene_id,
                     image_path=str(image_path),
-                    mask_path=str(mask_path) if mask_path else None,
-                    split="train",
+                    mask_path=str(mask_path),
+                    split=split,
                     class_label=class_label,
                     part=part,
                     source_path=str(image_path),
                 )
             )
 
-        self.scenes = scenes
+        logger.info(
+            "%s %s: %d images, %d masks, %d matched pairs",
+            part,
+            class_label,
+            len(image_files),
+            len(mask_files),
+            len(paired_ids),
+        )
+
         return scenes
 
-    def _find_mask(self, image_path: Path) -> Optional[Path]:
-        """Find the corresponding mask file for an image.
+    # ------------------------------------------------------------------
+    # Patch index
+    # ------------------------------------------------------------------
 
-        Search strategy (conservative, no guessing):
-        1. Same directory, same stem, different extension
-        2. Parent directory, mask subdir
-        3. Sibling directory containing "mask" in the name
+    def build_patch_index(
+        self,
+        split: Optional[str] = None,
+    ) -> List[dict]:
+        """Build a patch-level index.
 
-        Returns
-        -------
-        Path or None
+        Image dimensions are read from TIFF metadata without loading the
+        entire SAR image into memory.
+
+        Masks are loaded only when patch labels need to be calculated.
         """
-        candidates = []
-        stem = image_path.stem
-        parent = image_path.parent
 
-        # Same directory, same stem, different extension
-        candidates.append(parent / f"{stem}.tif")
-        candidates.append(parent / f"{stem}.tiff")
-        candidates.append(parent / f"{stem}.png")
-
-        # Look for mask in sibling directories
-        for subdir in parent.iterdir() if parent.exists() else []:
-            if subdir.is_dir() and "mask" in subdir.name.lower():
-                candidates.append(subdir / f"{stem}.tif")
-                candidates.append(subdir / f"{stem}.tiff")
-                candidates.append(subdir / f"{stem}.png")
-
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-
-        return None
-
-    def _infer_class_label(self, relative_path: Path) -> Optional[str]:
-        """Infer class label from path components.
-
-        Parameters
-        ----------
-        relative_path : Path
-            Path relative to dataset root.
-
-        Returns
-        -------
-        Optional[str]
-            "oil", "no_oil", "lookalike", or None.
-        """
-        path_text = str(relative_path).lower()
-        if "oil" in path_text and "mask" not in path_text:
-            return "oil"
-        if "no_oil" in path_text or "no-oil" in path_text or "nooil" in path_text:
-            return "no_oil"
-        if "lookalike" in path_text or "look_alike" in path_text:
-            return "lookalike"
-        return None
-
-    def build_patch_index(self, split: Optional[str] = None) -> List[dict]:
-        """Build a patch-level index without loading image data.
-
-        Parameters
-        ----------
-        split : str or None
-            If provided, only include scenes from that split.
-
-        Returns
-        -------
-        list of dict
-            Patch index entries with row/col/label/oil_fraction metadata.
-        """
-        from ..preprocessing.io import read_tiff, read_mask
+        from ..preprocessing.io import read_mask
 
         patches: List[dict] = []
+
         for scene in self.scenes:
+
             if split is not None and scene.split != split:
                 continue
-            if scene.image_path is None:
-                continue
 
-            image = read_tiff(scene.image_path)
-            if image.ndim != 3 or image.shape[0] != 2:
+            with rasterio.open(scene.image_path) as src:
+                height = src.height
+                width = src.width
+                count = src.count
+
+            if count != 2:
                 raise ValueError(
-                    f"Expected (2, H, W), got shape {image.shape} for {scene.image_path}"
+                    f"Expected 2 SAR bands (VV/VH), got {count} "
+                    f"for {scene.image_path}"
                 )
 
-            height, width = image.shape[1], image.shape[2]
-            if height % self.patch_size != 0 or width % self.patch_size != 0:
+            if (
+                height % self.patch_size != 0
+                or width % self.patch_size != 0
+            ):
                 raise ValueError(
-                    f"Scene size {height}×{width} not divisible by patch_size "
-                    f"{self.patch_size} for {scene.scene_id}"
+                    f"Scene size {height}×{width} is not divisible "
+                    f"by patch size {self.patch_size}: "
+                    f"{scene.scene_id}"
                 )
 
             mask = None
-            if scene.mask_path and Path(scene.mask_path).exists():
+
+            if scene.mask_path:
                 mask = read_mask(scene.mask_path)
 
-            for row in range(0, height, self.patch_size):
-                for col in range(0, width, self.patch_size):
-                    patch_mask = None
-                    oil_fraction = None
+                if mask.shape != (height, width):
+                    raise ValueError(
+                        f"Mask shape {mask.shape} does not match "
+                        f"image shape {(height, width)} for "
+                        f"{scene.scene_id}"
+                    )
+
+            for row in range(
+                0,
+                height,
+                self.patch_size,
+            ):
+                for col in range(
+                    0,
+                    width,
+                    self.patch_size,
+                ):
+
                     label = None
+                    oil_fraction = None
+
                     if mask is not None:
                         patch_mask = mask[
                             row : row + self.patch_size,
                             col : col + self.patch_size,
                         ]
-                        oil_fraction = float(patch_mask.sum()) / float(patch_mask.size)
-                        label = (
-                            1
-                            if oil_fraction >= self.oil_fraction_threshold
-                            else 0
+
+                        oil_fraction = (
+                            float(patch_mask.sum())
+                            / float(patch_mask.size)
+                        )
+
+                        label = int(
+                            oil_fraction
+                            >= self.oil_fraction_threshold
                         )
 
                     patches.append(
@@ -251,37 +460,79 @@ class DatasetIndex:
         self.patch_index = patches
         return patches
 
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
     def save_index(self, path: str | Path) -> None:
-        """Save the dataset index to a JSON file."""
+        """Save the scene index to JSON."""
+
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
+        path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        with open(
+            path,
+            "w",
+            encoding="utf-8",
+        ) as handle:
             json.dump(
                 [asdict(scene) for scene in self.scenes],
                 handle,
                 indent=2,
-                sort_keys=True,
             )
 
-    def load_index(self, path: str | Path) -> None:
-        """Load the dataset index from a JSON file."""
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        self.scenes = [SceneIndexItem(**item) for item in data]
+    # ------------------------------------------------------------------
+    # Utility
+    # ------------------------------------------------------------------
 
+    def summary(self) -> dict:
+        """Return a compact summary of the discovered dataset."""
 
-class PatchIndexBuilder:
-    """Build a patch index from a dataset root."""
-
-    def __init__(
-        self,
-        dataset_root: str | Path,
-        patch_size: int = 512,
-        oil_fraction_threshold: float = 0.01,
-    ) -> None:
-        self.index = DatasetIndex(dataset_root, patch_size, oil_fraction_threshold)
-
-    def build(self, split: Optional[str] = None) -> List[dict]:
-        """Build and return the patch index."""
-        scenes = self.index.discover_scenes()
-        return self.index.build_patch_index(split)
+        return {
+            "total_scenes": len(self.scenes),
+            "parts": {
+                "Part1": sum(
+                    s.part == "Part1"
+                    for s in self.scenes
+                ),
+                "Part2": sum(
+                    s.part == "Part2"
+                    for s in self.scenes
+                ),
+                "Part3": sum(
+                    s.part == "Part3"
+                    for s in self.scenes
+                ),
+            },
+            "classes": {
+                "oil": sum(
+                    s.class_label == "oil"
+                    for s in self.scenes
+                ),
+                "no_oil": sum(
+                    s.class_label == "no_oil"
+                    for s in self.scenes
+                ),
+                "lookalike": sum(
+                    s.class_label == "lookalike"
+                    for s in self.scenes
+                ),
+            },
+            "splits": {
+                "train": sum(
+                    s.split == "train"
+                    for s in self.scenes
+                ),
+                "validation": sum(
+                    s.split == "validation"
+                    for s in self.scenes
+                ),
+                "test": sum(
+                    s.split == "test"
+                    for s in self.scenes
+                ),
+            },
+        }
