@@ -18,6 +18,7 @@ from .model import ResNet18Gate
 from ..preprocessing.normalization import ChannelNormalizer
 from ..dataset.index import DatasetIndex
 from ..dataset.loader import LazyDataset, PatchDataset
+from ..dataset.splitter import SceneSplitter
 from ..common.logging import setup_logger, get_logger
 from ..common.seed import set_seed
 from ..common.validation import validate_image
