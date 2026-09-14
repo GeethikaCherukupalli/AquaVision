@@ -1,8 +1,3 @@
-# -*- coding: utf-8 -*-
-"""Scene-level data splitting for leakage prevention."""
-
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import List
 
@@ -13,8 +8,6 @@ from .index import SceneIndexItem
 
 @dataclass
 class SceneSplit:
-    """Scene-level train/validation/test split."""
-
     train: List[SceneIndexItem]
     validation: List[SceneIndexItem]
     test: List[SceneIndexItem]
@@ -25,13 +18,16 @@ class SceneSplit:
 
 
 class SceneSplitter:
-    """Split Part1/Part2 into train/validation while preserving Part3 as test.
+    """
+    Scene-level splitter.
 
-    Part3 is the official held-out test set and is NEVER randomly
-    repartitioned into train or validation.
+    Important:
+    - Part3 is permanently held out as TEST.
+    - Only Part1 and Part2 are split into TRAIN/VALIDATION.
+    - Splitting happens at scene level to prevent patch leakage.
     """
 
-    def __init__(self, random_seed: int = 42) -> None:
+    def __init__(self, random_seed: int = 42):
         self.random_seed = random_seed
 
     def split(
@@ -45,26 +41,38 @@ class SceneSplitter:
 
         if abs(train_ratio + validation_ratio - 1.0) > 1e-8:
             raise ValueError(
-                "Train and validation ratios must sum to 1.0 "
-                "when Part3 is the fixed test set."
+                "train_ratio + validation_ratio must equal 1.0 "
+                "because Part3 is the fixed test set."
+            )
+
+        if test_ratio != 0.0:
+            raise ValueError(
+                "test_ratio must be 0.0 because Part3 is already "
+                "the fixed held-out test set."
             )
 
         rng = np.random.RandomState(self.random_seed)
 
-        # Part3 is already explicitly marked test by DatasetIndex.
+        # ---------------------------------------------------------
+        # FIXED TEST SET
+        # ---------------------------------------------------------
         fixed_test = [
-            scene for scene in scenes
+            scene
+            for scene in scenes
             if scene.part == "Part3" or scene.split == "test"
         ]
 
-        # Only Part1/Part2 are eligible for train/validation.
+        # ---------------------------------------------------------
+        # TRAIN + VALIDATION CANDIDATES
+        # ---------------------------------------------------------
         train_val = [
-            scene for scene in scenes
+            scene
+            for scene in scenes
             if scene.part != "Part3" and scene.split != "test"
         ]
 
         if not train_val:
-            raise ValueError("No Part1/Part2 scenes available for train/validation.")
+            raise ValueError("No training/validation scenes available.")
 
         if per_class:
             train, validation = self._split_per_class(
@@ -74,16 +82,13 @@ class SceneSplitter:
                 rng,
             )
         else:
-            rng.shuffle(train_val)
+            shuffled = list(train_val)
+            rng.shuffle(shuffled)
 
-            n_train = int(len(train_val) * train_ratio)
+            n_train = int(len(shuffled) * train_ratio)
 
-            train = train_val[:n_train]
-            validation = train_val[n_train:]
-
-        rng.shuffle(train)
-        rng.shuffle(validation)
-        rng.shuffle(fixed_test)
+            train = shuffled[:n_train]
+            validation = shuffled[n_train:]
 
         return SceneSplit(
             train=train,
@@ -98,28 +103,42 @@ class SceneSplitter:
         validation_ratio: float,
         rng: np.random.RandomState,
     ):
-        """Stratified scene-level train/validation split."""
+        """
+        Stratified scene-level train/validation split.
+        """
 
-        groups = {}
-
-        for scene in scenes:
-            label = scene.class_label or "unknown"
-            groups.setdefault(label, []).append(scene)
+        classes = sorted(set(scene.class_label for scene in scenes))
 
         train = []
         validation = []
 
-        for label, group in groups.items():
-            rng.shuffle(group)
+        for class_label in classes:
 
-            n_train = int(len(group) * train_ratio)
+            class_scenes = [
+                scene
+                for scene in scenes
+                if scene.class_label == class_label
+            ]
 
-            # Keep at least one validation scene for sufficiently
-            # large groups.
-            if len(group) > 1:
-                n_train = min(n_train, len(group) - 1)
+            rng.shuffle(class_scenes)
 
-            train.extend(group[:n_train])
-            validation.extend(group[n_train:])
+            n_train = int(len(class_scenes) * train_ratio)
+
+            # Guarantee at least one validation scene
+            # when a class has more than one scene.
+            if len(class_scenes) > 1:
+                n_train = min(
+                    n_train,
+                    len(class_scenes) - 1,
+                )
+
+            class_train = class_scenes[:n_train]
+            class_validation = class_scenes[n_train:]
+
+            train.extend(class_train)
+            validation.extend(class_validation)
+
+        rng.shuffle(train)
+        rng.shuffle(validation)
 
         return train, validation
