@@ -5,4 +5,3 @@ from .model import ResNet18Gate
 from .train import train_resnet
 from .evaluate import evaluate_resnet
 from .inference import ResNetInference
-from .threshold import threshold_sweep
