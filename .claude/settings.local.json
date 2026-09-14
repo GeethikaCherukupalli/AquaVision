@@ -6,7 +6,7 @@
         "ANTHROPIC_MODEL": "z-ai/glm-5.2:free",
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "z-ai/glm-5.2:free",
         "ANTHROPIC_DEFAULT_SONNET_MODEL": "z-ai/glm-5.2:free",
-        "ANTHROPIC_DEFAULT_FABLE_MODEL": "z-ai/glm-5.2:free",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL": "nemotron-3-ultra-550b-a55b:free",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": "openrouter/free",
         "CLAUDE_CODE_SUBAGENT_MODEL": "openrouter/free",
         "CLAUDE_CODE_MXA_CONTEXT_TOKENS": "256000"

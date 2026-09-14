@@ -90,6 +90,29 @@ class SceneSplitter:
             train = shuffled[:n_train]
             validation = shuffled[n_train:]
 
+        # ---------------------------------------------------------
+        # STAMP scene.split TO MATCH THE PARTITION IT WAS PLACED IN.
+        #
+        # discover_scenes() marks every Part1/Part2 scene as "train"
+        # up front (see dataset/index.py), on the assumption that this
+        # splitter would assign the real per-scene split afterwards.
+        # Previously that assignment never happened: scenes placed in
+        # `validation` kept the literal string "train" on
+        # `scene.split`, so LazyDataset(split="validation") filtered
+        # dataset.scenes down to an empty list and raised
+        # "No scenes found for split 'validation'". Stamping here,
+        # at the single source of truth, means every caller of
+        # SceneSplitter (train_resnet, tests, notebooks) gets scenes
+        # whose `.split` field is always correct without needing an
+        # ad-hoc fix downstream.
+        # ---------------------------------------------------------
+        for scene in train:
+            scene.split = "train"
+        for scene in validation:
+            scene.split = "validation"
+        for scene in fixed_test:
+            scene.split = "test"
+
         return SceneSplit(
             train=train,
             validation=validation,

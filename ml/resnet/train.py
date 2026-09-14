@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -356,6 +357,8 @@ def train_resnet(
     from torch.utils.data import DataLoader
 
     config = config or {}
+    logger.info("=== Stage 1 ResNet18 training: dataset discovery starting ===")
+    logger.info("Dataset root: %s", dataset_root)
     dataset = DatasetIndex(dataset_root)
     scenes = dataset.discover_scenes()
 
@@ -365,18 +368,100 @@ def train_resnet(
             "Check the dataset path and structure."
         )
 
+    part_counts = {
+        part: sum(1 for s in scenes if s.part == part)
+        for part in ("Part1", "Part2", "Part3")
+    }
+    logger.info(
+        "Discovered %d scenes total (Part1=%d, Part2=%d, Part3=%d)",
+        len(scenes), part_counts["Part1"], part_counts["Part2"], part_counts["Part3"],
+    )
+
     # Split scenes and assign labels
     splitter = SceneSplitter(random_seed=config.get("random_seed", 42))
     split = splitter.split(scenes)
     dataset.scenes = split.train + split.validation + split.test
 
-    # Compute normalization statistics from training images only
-    logger.info("Computing normalization statistics from training images")
+    logger.info(
+        "Split complete: train=%d, validation=%d, test=%d",
+        len(split.train), len(split.validation), len(split.test),
+    )
+    assert all(s.split == "train" for s in split.train)
+    assert all(s.split == "validation" for s in split.validation)
+    assert all(s.split == "test" for s in split.test)
+    assert all(s.part == "Part3" for s in split.test), (
+        "Data leakage: a non-Part3 scene ended up in the held-out test split."
+    )
+    assert not any(s.part == "Part3" for s in split.train + split.validation), (
+        "Data leakage: a Part3 scene leaked into train/validation."
+    )
+
+    # Compute normalization statistics from training images only.
+    # NOTE: this reads pixel data from every training TIFF and is the
+    # slowest step before training starts (this is almost certainly
+    # what consumed the ~1 hour before the crash). It intentionally
+    # only ever sees split.train, never split.validation or
+    # split.test, so Part3 (and validation) can never leak into the
+    # normalization statistics.
     train_image_paths = [scene.image_path for scene in split.train]
-    vv_mean, vv_std, vh_mean, vh_std = compute_normalization_stats(train_image_paths)
-    normalizer = ChannelNormalizer(vv_mean, vv_std, vh_mean, vh_std)
+
+    # Lightweight, deterministic cache for normalization stats only.
+    # Keyed on the exact set of training image paths + the random
+    # seed, so it is invalidated automatically if the dataset
+    # structure/split changes. This does NOT cache model tensors and
+    # does NOT copy any dataset files; it only avoids re-scanning
+    # pixel data across repeated debugging runs on the same split.
+    cache_path = Path(dataset_root) / "artifacts" / "normalization_cache.json"
+    cache_key = hashlib.sha256(
+        ("|".join(sorted(train_image_paths)) + f"|seed={config.get('random_seed', 42)}").encode("utf-8")
+    ).hexdigest()
+
+    normalizer = None
+    if cache_path.exists():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            if cached.get("cache_key") == cache_key:
+                normalizer = ChannelNormalizer(
+                    cached["vv_mean"], cached["vv_std"],
+                    cached["vh_mean"], cached["vh_std"],
+                )
+                logger.info(
+                    "Reusing cached normalization statistics from %s "
+                    "(train split unchanged, seed unchanged).",
+                    cache_path,
+                )
+        except Exception as exc:  # noqa: BLE001 - cache is best-effort only
+            logger.warning("Normalization cache unreadable (%s); recomputing.", exc)
+            normalizer = None
+
+    if normalizer is None:
+        logger.info(
+            "Computing normalization statistics from %d training images "
+            "(this reads pixel data and can take a while)...",
+            len(split.train),
+        )
+        vv_mean, vv_std, vh_mean, vh_std = compute_normalization_stats(train_image_paths)
+        normalizer = ChannelNormalizer(vv_mean, vv_std, vh_mean, vh_std)
+        logger.info("Normalization statistics computed.")
+
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                json.dumps(
+                    {
+                        "cache_key": cache_key,
+                        "vv_mean": vv_mean, "vv_std": vv_std,
+                        "vh_mean": vh_mean, "vh_std": vh_std,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001 - cache is best-effort only
+            logger.warning("Could not write normalization cache (%s); continuing.", exc)
 
     # Build datasets
+    logger.info("Constructing train/validation LazyDataset objects...")
     train_dataset = LazyDataset(
         dataset_index=dataset,
         normalizer=normalizer,
@@ -386,6 +471,10 @@ def train_resnet(
         dataset_index=dataset,
         normalizer=normalizer,
         split="validation",
+    )
+    logger.info(
+        "Datasets constructed: train_scenes=%d, validation_scenes=%d",
+        len(train_dataset.scenes), len(val_dataset.scenes),
     )
 
     # Data loaders
@@ -405,6 +494,7 @@ def train_resnet(
     )
 
     # Train model
+    logger.info("=== Actual ResNet18 model training starting now ===")
     trainer = ResNetTrainer(config)
     history = trainer.train(train_loader, val_loader)
 
