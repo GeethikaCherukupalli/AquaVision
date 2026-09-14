@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List
 
 import numpy as np
 
-from .index import DatasetIndex, SceneIndexItem
+from .index import SceneIndexItem
 
 
 @dataclass
@@ -23,16 +21,14 @@ class SceneSplit:
 
     @property
     def all_scenes(self) -> List[SceneIndexItem]:
-        """Return all scenes."""
         return self.train + self.validation + self.test
 
 
 class SceneSplitter:
-    """Split scenes into train/validation/test with leakage prevention.
+    """Split Part1/Part2 into train/validation while preserving Part3 as test.
 
-    The split is performed at the scene level, never at the patch level.
-    This ensures that spatially adjacent patches from the same scene
-    never appear in different splits.
+    Part3 is the official held-out test set and is NEVER randomly
+    repartitioned into train or validation.
     """
 
     def __init__(self, random_seed: int = 42) -> None:
@@ -42,56 +38,57 @@ class SceneSplitter:
         self,
         scenes: List[SceneIndexItem],
         train_ratio: float = 0.80,
-        validation_ratio: float = 0.10,
-        test_ratio: float = 0.10,
+        validation_ratio: float = 0.20,
+        test_ratio: float = 0.0,
         per_class: bool = True,
     ) -> SceneSplit:
-        """Split scenes into train/validation/test.
 
-        Parameters
-        ----------
-        scenes : list of SceneIndexItem
-            All discovered scenes.
-        train_ratio : float
-            Fraction of scenes for training.
-        validation_ratio : float
-            Fraction of scenes for validation.
-        test_ratio : float
-            Fraction of scenes for test (held-out Part III).
-        per_class : bool
-            If True, split stratified by class label.
-
-        Returns
-        -------
-        SceneSplit
-        """
-        if train_ratio + validation_ratio + test_ratio != 1.0:
-            raise ValueError("Splits must sum to 1.0")
-
-        rng = np.random.RandomState(self.random_seed)
-        rng.shuffle(scenes)
-
-        total = len(scenes)
-        if total == 0:
-            raise ValueError("No scenes available for splitting")
-
-        if per_class and any(scene.class_label for scene in scenes):
-            return self._split_per_class(
-                scenes, train_ratio, validation_ratio, test_ratio, rng
+        if abs(train_ratio + validation_ratio - 1.0) > 1e-8:
+            raise ValueError(
+                "Train and validation ratios must sum to 1.0 "
+                "when Part3 is the fixed test set."
             )
 
-        # Non-stratified split
-        n_train = int(total * train_ratio)
-        n_validation = int(total * validation_ratio)
-        n_test = total - n_train - n_validation
+        rng = np.random.RandomState(self.random_seed)
 
-        train_end = n_train
-        validation_end = n_train + n_validation
+        # Part3 is already explicitly marked test by DatasetIndex.
+        fixed_test = [
+            scene for scene in scenes
+            if scene.part == "Part3" or scene.split == "test"
+        ]
+
+        # Only Part1/Part2 are eligible for train/validation.
+        train_val = [
+            scene for scene in scenes
+            if scene.part != "Part3" and scene.split != "test"
+        ]
+
+        if not train_val:
+            raise ValueError("No Part1/Part2 scenes available for train/validation.")
+
+        if per_class:
+            train, validation = self._split_per_class(
+                train_val,
+                train_ratio,
+                validation_ratio,
+                rng,
+            )
+        else:
+            rng.shuffle(train_val)
+
+            n_train = int(len(train_val) * train_ratio)
+
+            train = train_val[:n_train]
+            validation = train_val[n_train:]
+
+        rng.shuffle(train)
+        rng.shuffle(validation)
+        rng.shuffle(fixed_test)
 
         return SceneSplit(
-            train=scenes[:train_end],
-            validation=scenes[train_end:validation_end],
-            test=scenes[validation_end:],
+            train=train,
+            validation=validation,
+            test=fixed_test,
         )
 
     def _split_per_class(
@@ -99,32 +96,30 @@ class SceneSplitter:
         scenes: List[SceneIndexItem],
         train_ratio: float,
         validation_ratio: float,
-        test_ratio: float,
         rng: np.random.RandomState,
-    ) -> SceneSplit:
-        """Stratified split by class label."""
-        groups: dict = {}
+    ):
+        """Stratified scene-level train/validation split."""
+
+        groups = {}
+
         for scene in scenes:
             label = scene.class_label or "unknown"
             groups.setdefault(label, []).append(scene)
 
-        train: List[SceneIndexItem] = []
-        validation: List[SceneIndexItem] = []
-        test: List[SceneIndexItem] = []
+        train = []
+        validation = []
 
         for label, group in groups.items():
             rng.shuffle(group)
-            n_train = max(1, int(len(group) * train_ratio)) if len(group) > 1 else 0
-            n_validation = (
-                max(1, int(len(group) * validation_ratio)) if len(group) > 1 else 0
-            )
-            n_test = len(group) - n_train - n_validation
+
+            n_train = int(len(group) * train_ratio)
+
+            # Keep at least one validation scene for sufficiently
+            # large groups.
+            if len(group) > 1:
+                n_train = min(n_train, len(group) - 1)
 
             train.extend(group[:n_train])
-            validation.extend(group[n_train : n_train + n_validation])
-            test.extend(group[n_train + n_validation :])
+            validation.extend(group[n_train:])
 
-        rng.shuffle(train)
-        rng.shuffle(validation)
-        rng.shuffle(test)
-        return SceneSplit(train=train, validation=validation, test=test)
+        return train, validation

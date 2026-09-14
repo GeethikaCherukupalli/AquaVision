@@ -320,7 +320,6 @@ class ResNetTrainer:
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "config": self.config,
-            "epoch": len(self.history.get("train", [])),
         }
         torch.save(checkpoint, str(path))
 
