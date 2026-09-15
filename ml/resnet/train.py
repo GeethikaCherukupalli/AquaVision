@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -405,60 +404,24 @@ def train_resnet(
     # normalization statistics.
     train_image_paths = [scene.image_path for scene in split.train]
 
-    # Lightweight, deterministic cache for normalization stats only.
-    # Keyed on the exact set of training image paths + the random
-    # seed, so it is invalidated automatically if the dataset
-    # structure/split changes. This does NOT cache model tensors and
-    # does NOT copy any dataset files; it only avoids re-scanning
-    # pixel data across repeated debugging runs on the same split.
-    cache_path = Path(dataset_root) / "artifacts" / "normalization_cache.json"
-    cache_key = hashlib.sha256(
-        ("|".join(sorted(train_image_paths)) + f"|seed={config.get('random_seed', 42)}").encode("utf-8")
-    ).hexdigest()
-
-    normalizer = None
-    if cache_path.exists():
-        try:
-            cached = json.loads(cache_path.read_text(encoding="utf-8"))
-            if cached.get("cache_key") == cache_key:
-                normalizer = ChannelNormalizer(
-                    cached["vv_mean"], cached["vv_std"],
-                    cached["vh_mean"], cached["vh_std"],
-                )
-                logger.info(
-                    "Reusing cached normalization statistics from %s "
-                    "(train split unchanged, seed unchanged).",
-                    cache_path,
-                )
-        except Exception as exc:  # noqa: BLE001 - cache is best-effort only
-            logger.warning("Normalization cache unreadable (%s); recomputing.", exc)
-            normalizer = None
-
-    if normalizer is None:
-        logger.info(
-            "Computing normalization statistics from %d training images "
-            "(this reads pixel data and can take a while)...",
-            len(split.train),
-        )
-        vv_mean, vv_std, vh_mean, vh_std = compute_normalization_stats(train_image_paths)
-        normalizer = ChannelNormalizer(vv_mean, vv_std, vh_mean, vh_std)
-        logger.info("Normalization statistics computed.")
-
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(
-                json.dumps(
-                    {
-                        "cache_key": cache_key,
-                        "vv_mean": vv_mean, "vv_std": vv_std,
-                        "vh_mean": vh_mean, "vh_std": vh_std,
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-        except Exception as exc:  # noqa: BLE001 - cache is best-effort only
-            logger.warning("Could not write normalization cache (%s); continuing.", exc)
+    # Caching + Google-Drive read retries now live inside
+    # compute_normalization_stats() itself (see
+    # preprocessing/normalization.py), keyed on dataset_root +
+    # random_seed + the exact sorted training path list. This call
+    # only ever sees split.train, so validation/Part3 can never
+    # leak into the statistics.
+    logger.info(
+        "Computing normalization statistics from %d training images "
+        "(cache checked first; falls back to reading pixel data)...",
+        len(split.train),
+    )
+    vv_mean, vv_std, vh_mean, vh_std = compute_normalization_stats(
+        train_image_paths,
+        dataset_root=dataset_root,
+        random_seed=config.get("random_seed", 42),
+    )
+    normalizer = ChannelNormalizer(vv_mean, vv_std, vh_mean, vh_std)
+    logger.info("Normalization statistics ready.")
 
     # Build datasets
     logger.info("Constructing train/validation LazyDataset objects...")
