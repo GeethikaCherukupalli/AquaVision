@@ -5,6 +5,7 @@ no real TIFF files or dataset are required.
 """
 import sys
 from pathlib import Path
+import json
 
 import numpy as np
 import pytest
@@ -112,6 +113,60 @@ def test_cache_hit_avoids_rescanning_tiffs(tmp_path, monkeypatch):
     assert stats1 == stats2
 
 
+def test_cache_file_contains_required_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(io_module, "read_tiff", lambda path: fake_image())
+    paths = ["/fake/b.tif", "/fake/a.tif"]
+
+    compute_normalization_stats(paths, dataset_root=tmp_path, random_seed=42)
+
+    cache_file = tmp_path / "artifacts" / "normalization_cache.json"
+    data = json.loads(cache_file.read_text())
+
+    assert data["training_image_paths"] == sorted(paths)  # sorted, as required
+    assert data["num_training_images"] == 2
+    assert data["vv_mean"] == pytest.approx(2.0)
+    assert data["vv_std"] == pytest.approx(1.0)
+    assert data["vh_mean"] == pytest.approx(-1.0)
+    assert data["vh_std"] == pytest.approx(1.0)
+    assert data["random_seed"] == 42
+    assert "version" in data
+
+
+def test_cache_write_is_atomic_no_leftover_tmp_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(io_module, "read_tiff", lambda path: fake_image())
+    compute_normalization_stats(["/fake/a.tif"], dataset_root=tmp_path, random_seed=1)
+
+    artifacts_dir = tmp_path / "artifacts"
+    leftover_tmp_files = list(artifacts_dir.glob(".normalization_cache_*.tmp"))
+    assert leftover_tmp_files == []
+    assert (artifacts_dir / "normalization_cache.json").exists()
+
+
+def test_cache_invalidated_by_version_mismatch(tmp_path, monkeypatch):
+    from aquavision.preprocessing import normalization as norm_module
+
+    monkeypatch.setattr(io_module, "read_tiff", lambda path: fake_image())
+    paths = ["/fake/a.tif"]
+
+    compute_normalization_stats(paths, dataset_root=tmp_path, random_seed=1)
+    cache_file = tmp_path / "artifacts" / "normalization_cache.json"
+
+    # Simulate an older/incompatible cache schema version.
+    data = json.loads(cache_file.read_text())
+    data["version"] = norm_module.NORMALIZATION_CACHE_VERSION + 999
+    cache_file.write_text(json.dumps(data))
+
+    read_count = {"n": 0}
+
+    def counting_read(path):
+        read_count["n"] += 1
+        return fake_image()
+
+    monkeypatch.setattr(io_module, "read_tiff", counting_read)
+    compute_normalization_stats(paths, dataset_root=tmp_path, random_seed=1)
+    assert read_count["n"] == 1  # recomputed rather than trusting a version mismatch
+
+
 def test_cache_miss_when_training_paths_change(tmp_path, monkeypatch):
     monkeypatch.setattr(io_module, "read_tiff", lambda path: fake_image())
 
@@ -133,7 +188,12 @@ def test_cache_miss_when_training_paths_change(tmp_path, monkeypatch):
     assert read_count["n"] == 2  # recomputed, did not reuse stale cache
 
 
-def test_cache_miss_when_random_seed_changes(tmp_path, monkeypatch):
+def test_seed_alone_does_not_invalidate_cache_when_paths_are_identical(tmp_path, monkeypatch):
+    """Per spec: cache validity is defined by the sorted training-image
+    path list matching exactly. random_seed is stored for provenance
+    but is not itself part of the invalidation check — in practice a
+    changed seed changes which scenes are in split.train, which
+    changes the path list, which invalidates the cache anyway."""
     monkeypatch.setattr(io_module, "read_tiff", lambda path: fake_image())
     paths = ["/fake/a.tif", "/fake/b.tif"]
 
@@ -148,7 +208,7 @@ def test_cache_miss_when_random_seed_changes(tmp_path, monkeypatch):
     monkeypatch.setattr(io_module, "read_tiff", counting_read)
     compute_normalization_stats(paths, dataset_root=tmp_path, random_seed=1)
 
-    assert read_count["n"] == 2  # different seed -> cache invalidated
+    assert read_count["n"] == 0  # same path list -> cache hit regardless of seed
 
 
 def test_no_caching_when_dataset_root_not_given(tmp_path, monkeypatch):

@@ -12,6 +12,11 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Bump this if the cache file's schema changes. A cache written by an
+# older/newer version is treated as stale and recomputed rather than
+# trusted blindly.
+NORMALIZATION_CACHE_VERSION = 1
+
 
 class ChannelNormalizer:
     """Channel-wise mean/std normalizer for VV/VH SAR data.
@@ -138,10 +143,10 @@ def _read_tiff_with_retry(path, max_retries: int = 3):
 def _load_normalization_cache(
     cache_path: Path,
     sorted_paths: list,
-    random_seed: Optional[int],
-) -> Optional[Tuple[float, float, float, float]]:
-    """Return cached (vv_mean, vv_std, vh_mean, vh_std) if the cache is
-    valid for this exact set of training paths + seed, else None."""
+) -> Optional[Dict]:
+    """Return the cached dict if the cache exists, matches the current
+    schema version, and its sorted training-image path list exactly
+    matches ``sorted_paths``. Otherwise return None (cache miss)."""
     if not cache_path.exists():
         return None
 
@@ -154,53 +159,64 @@ def _load_normalization_cache(
         )
         return None
 
-    if (
-        cached.get("image_paths") == sorted_paths
-        and cached.get("count") == len(sorted_paths)
-        and cached.get("random_seed") == random_seed
-    ):
+    if cached.get("version") != NORMALIZATION_CACHE_VERSION:
         logger.info(
-            "Normalization cache hit at %s (%d training paths, "
-            "random_seed=%s) — skipping rescan of TIFFs.",
-            cache_path, len(sorted_paths), random_seed,
+            "Normalization cache at %s has version %s (expected %s); "
+            "recomputing.",
+            cache_path, cached.get("version"), NORMALIZATION_CACHE_VERSION,
         )
-        return (
-            cached["vv_mean"], cached["vv_std"],
-            cached["vh_mean"], cached["vh_std"],
-        )
+        return None
+
+    if (
+        cached.get("training_image_paths") == sorted_paths
+        and cached.get("num_training_images") == len(sorted_paths)
+    ):
+        return cached
 
     logger.info(
-        "Normalization cache at %s is stale (training path list or "
-        "random_seed changed); recomputing.",
+        "Normalization cache at %s is stale (training image path list "
+        "does not match the current split); recomputing.",
         cache_path,
     )
     return None
 
 
-def _write_normalization_cache(
+def _write_normalization_cache_atomic(
     cache_path: Path,
     sorted_paths: list,
     random_seed: Optional[int],
     stats: Tuple[float, float, float, float],
 ) -> None:
+    """Write the cache atomically: write to a temp file in the same
+    directory, then os.replace() it into place, so an interrupted
+    write (e.g. a Colab runtime restart mid-save) never leaves a
+    corrupt/partial cache file behind."""
+    import os
+    import tempfile
+
     vv_mean, vv_std, vh_mean, vh_std = stats
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "version": NORMALIZATION_CACHE_VERSION,
+        "training_image_paths": sorted_paths,
+        "num_training_images": len(sorted_paths),
+        "vv_mean": vv_mean,
+        "vv_std": vv_std,
+        "vh_mean": vh_mean,
+        "vh_std": vh_std,
+        "random_seed": random_seed,
+    }
+
+    tmp_name = None
     try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(
-            json.dumps(
-                {
-                    "image_paths": sorted_paths,
-                    "count": len(sorted_paths),
-                    "random_seed": random_seed,
-                    "vv_mean": vv_mean,
-                    "vv_std": vv_std,
-                    "vh_mean": vh_mean,
-                    "vh_std": vh_std,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(cache_path.parent), prefix=".normalization_cache_", suffix=".tmp"
         )
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        os.replace(tmp_name, cache_path)  # atomic on POSIX and Windows
+        tmp_name = None
         logger.info("Wrote normalization cache to %s", cache_path)
     except Exception as exc:  # noqa: BLE001 - cache is best-effort
         logger.warning(
@@ -208,6 +224,9 @@ def _write_normalization_cache(
             "continuing without it.",
             cache_path, exc,
         )
+    finally:
+        if tmp_name is not None and os.path.exists(tmp_name):
+            os.remove(tmp_name)
 
 
 def compute_normalization_stats(
@@ -217,32 +236,29 @@ def compute_normalization_stats(
     random_seed: Optional[int] = None,
     max_retries: int = 3,
 ) -> Tuple[float, float, float, float]:
-    """Compute training-only channel-wise mean/std.
+    """Compute (or load cached) training-only channel-wise mean/std.
 
     Parameters
     ----------
     image_paths : iterable of str or Path
-        Paths to training SAR images. Must be training scenes only —
-        this function has no knowledge of splits and will happily
-        compute statistics over whatever is passed in, so callers must
-        continue to pass ``split.train`` paths only.
+        Paths to training SAR images ONLY. This function has no
+        knowledge of splits and will happily compute statistics over
+        whatever is passed in, so callers must continue to pass
+        ``split.train`` paths only — never validation or Part3/test.
     chunk_size : int
         Number of images to process before updating running statistics.
     dataset_root : str, Path, or None
         If given, statistics are cached at
         ``<dataset_root>/artifacts/normalization_cache.json`` and
-        reused on later calls with the exact same sorted path list and
-        ``random_seed``. If None, no caching is performed (same
-        behavior as before this change).
+        reused on later calls whose sorted training-image path list
+        matches exactly. If None, no caching is performed.
     random_seed : int or None
-        Recorded in the cache and used as part of the cache-validity
-        check, so a different split (different seed) never reuses
-        another split's cached statistics.
+        Recorded in the cache for provenance/reproducibility. Not part
+        of the cache-validity check itself (a changed seed changes
+        which scenes land in split.train, which changes the sorted
+        path list, which already invalidates the cache on its own).
     max_retries : int
-        Number of read attempts per TIFF before giving up (see
-        ``_read_tiff_with_retry``). Google Drive-backed reads can fail
-        transiently; this does not change which data contributes to
-        the statistics, only how robustly it's read.
+        Number of read attempts per TIFF before giving up.
 
     Returns
     -------
@@ -255,12 +271,24 @@ def compute_normalization_stats(
 
     sorted_paths = sorted(str(p) for p in image_paths)
 
-    cache_path = None
-    if dataset_root is not None:
-        cache_path = Path(dataset_root) / "artifacts" / "normalization_cache.json"
-        cached_stats = _load_normalization_cache(cache_path, sorted_paths, random_seed)
-        if cached_stats is not None:
-            return cached_stats
+    cache_path = (
+        Path(dataset_root) / "artifacts" / "normalization_cache.json"
+        if dataset_root is not None
+        else None
+    )
+
+    if cache_path is not None:
+        cached = _load_normalization_cache(cache_path, sorted_paths)
+        if cached is not None:
+            print("Loading normalization statistics from cache...")
+            vv_mean, vv_std = cached["vv_mean"], cached["vv_std"]
+            vh_mean, vh_std = cached["vh_mean"], cached["vh_std"]
+            _print_normalization_summary(
+                vv_mean, vv_std, vh_mean, vh_std, len(sorted_paths), cache_path,
+            )
+            return vv_mean, vv_std, vh_mean, vh_std
+
+    print("Computing normalization statistics from training images...")
 
     vv_sum = 0.0
     vv_sq_sum = 0.0
@@ -300,6 +328,19 @@ def compute_normalization_stats(
     stats = (vv_mean, vv_std, vh_mean, vh_std)
 
     if cache_path is not None:
-        _write_normalization_cache(cache_path, sorted_paths, random_seed, stats)
+        _write_normalization_cache_atomic(cache_path, sorted_paths, random_seed, stats)
 
+    _print_normalization_summary(
+        vv_mean, vv_std, vh_mean, vh_std, len(sorted_paths), cache_path,
+    )
     return stats
+
+
+def _print_normalization_summary(
+    vv_mean: float, vv_std: float, vh_mean: float, vh_std: float,
+    num_training_images: int, cache_path: "Path | None",
+) -> None:
+    print(f"VV mean/std: {vv_mean:.6f} / {vv_std:.6f}")
+    print(f"VH mean/std: {vh_mean:.6f} / {vh_std:.6f}")
+    print(f"Number of training images: {num_training_images}")
+    print(f"Cache path: {cache_path if cache_path is not None else '(caching disabled)'}")
