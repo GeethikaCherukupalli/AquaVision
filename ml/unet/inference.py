@@ -29,7 +29,7 @@ class UNetInference:
         )
         self.segmentation_threshold = segmentation_threshold
 
-        self.model = UNet(pretrained=False).to(self.device)
+        self.model = UNet().to(self.device)
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.eval()

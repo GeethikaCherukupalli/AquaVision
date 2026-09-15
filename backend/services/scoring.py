@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..providers.ais import AISCandidate
+from .ais import AISCandidate
 
 
 @dataclass
@@ -17,6 +17,7 @@ class VesselScore:
     score: float  # 0-100
     classification: str  # "low", "moderate", "high"
     evidence: Dict[str, Any]
+    positions: List[Any] = field(default_factory=list)
     proximity: Optional[float] = None
     temporal_correlation: Optional[float] = None
     trajectory_consistency: Optional[float] = None
@@ -97,6 +98,7 @@ class AISScoringService:
                     score=score,
                     classification=classification,
                     evidence=evidence,
+                    positions=candidate.positions,
                     proximity=evidence.get("minimum_distance"),
                     temporal_correlation=evidence.get("time_difference"),
                     trajectory_consistency=evidence.get(
