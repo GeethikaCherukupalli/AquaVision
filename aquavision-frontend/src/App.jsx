@@ -1,0 +1,18 @@
+import { useEffect, useState } from 'react';
+import Header from './components/layout/Header';
+import Sidebar from './components/layout/Sidebar';
+import MapView from './components/map/MapView';
+import GlobeView from './components/map/GlobeView';
+import Pipeline from './components/analysis/Pipeline';
+import DetailsPanel from './components/analysis/DetailsPanel';
+import { getReadiness, runAnalysis } from './services/api';
+
+const initialLayers = { spill: true, origin: true, vessels: true, forecast: true };
+
+export default function App() {
+  const [mode, setMode] = useState('historical'); const [active, setActive] = useState('Overview'); const [view, setView] = useState('map'); const [layers, setLayers] = useState(initialLayers); const [readiness, setReadiness] = useState(null); const [analysis, setAnalysis] = useState(null); const [loading, setLoading] = useState(false); const [error, setError] = useState('');
+  useEffect(() => { getReadiness().then(setReadiness).catch(() => setReadiness({ status: 'offline', providers: {} })); }, []);
+  async function handleRun() { setLoading(true); setError(''); try { setAnalysis(await runAnalysis({ mode, sensor: 'sentinel-1', region: { west: 68, south: 8, east: 78, north: 23 } })); } catch (requestError) { setError(requestError.message); } finally { setLoading(false); } }
+  const data = analysis?.result;
+  return <div className="app-shell"><Header mode={mode} setMode={setMode} readiness={readiness} /><Sidebar active={active} setActive={setActive} /><main className="workspace"><div className="workspace-toolbar"><div><span className="eyebrow">{active.toUpperCase()} / {mode.toUpperCase()}</span><h1>{active === 'Overview' ? 'Marine oil-spill intelligence' : active}</h1></div><div className="view-switch"><button className={view === 'map' ? 'active' : ''} onClick={() => setView('map')}>2D MAP</button><button className={view === 'globe' ? 'active' : ''} onClick={() => setView('globe')}>3D GLOBE</button></div></div>{error && <div className="error-banner">API unavailable: {error}. Confirm the FastAPI service is running on port 8000.</div>}<div className="workspace-grid"><div className="map-column"><div className="map-panel">{view === 'map' ? <MapView analysis={data} layers={layers} /> : <GlobeView analysis={data} />}<div className="layer-control"><strong>LAYERS</strong>{Object.entries(layers).map(([key, enabled]) => <label key={key}><input type="checkbox" checked={enabled} onChange={() => setLayers({ ...layers, [key]: !enabled })} />{key === 'spill' ? 'Oil spill contour' : key === 'origin' ? 'Probable origin' : key === 'vessels' ? 'AIS vessels' : 'Forecast trajectory'}</label>)}</div></div><div className="lower-grid"><Pipeline analysis={data} /><section className="panel event-panel"><div className="panel-heading"><span>EVENT SUMMARY</span><span className="technical-badge">{data ? data.analysis_id : 'NO ACTIVE EVENT'}</span></div><div className="summary-row"><span>Detection confidence</span><strong>{data?.stage_1?.quality?.confidence ? `${Math.round(data.stage_1.quality.confidence * 100)}%` : 'N/A'}</strong></div><div className="summary-row"><span>Forecast horizon</span><strong>{data?.stage_2?.forecast?.horizons?.at(-1) || 'N/A'}</strong></div><div className="summary-row"><span>AIS candidates</span><strong>{data?.stage_3?.vessel_candidates?.length ?? 'N/A'}</strong></div><p className="disclaimer">Correlation indicates analytical proximity and does not establish responsibility.</p></section></div></div><DetailsPanel analysis={analysis} readiness={readiness} onRun={handleRun} loading={loading} mode={mode} /></div></main></div>;
+}
