@@ -1,0 +1,14 @@
+{
+  "vv_mean": -32.18445718717575,
+  "vv_std": 7.279349759468333,
+  "vh_mean": -20.07334799325466,
+  "vh_std": 5.79745789291743,
+  "samples": {
+    "scenes": 1000,
+    "pixels_per_scene": 512,
+    "total_vv_pixels": 512000,
+    "total_vh_pixels": 512000
+  },
+  "source": "training_scenes_only",
+  "random_seed": 42
+}

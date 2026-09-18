@@ -1,0 +1,39 @@
+{
+  "model": "ResNet18",
+  "input_channels": 2,
+  "input_bands": [
+    "VV",
+    "VH"
+  ],
+  "patch_size": 512,
+  "task": "binary oil-candidate classification",
+  "label_definition": {
+    "oil": "oil_fraction >= 0.01",
+    "not_oil": "oil_fraction < 0.01",
+    "not_oil_sources": [
+      "No_oil",
+      "Lookalike"
+    ]
+  },
+  "best_epoch": 6,
+  "validation_metrics": {
+    "pr_auc": 0.9364,
+    "roc_auc": 0.9843,
+    "precision": 0.8941,
+    "recall": 0.8665,
+    "f1": 0.8801
+  },
+  "classification_threshold": 0.84,
+  "training": {
+    "epochs_completed": 6,
+    "planned_epochs": 10,
+    "batch_size": 32,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0001,
+    "positive_weight": 6.51820471719716,
+    "optimizer": "AdamW",
+    "loss": "BCEWithLogitsLoss",
+    "best_metric": "validation PR-AUC"
+  },
+  "status": "v1_checkpoint_for_aquavision"
+}
