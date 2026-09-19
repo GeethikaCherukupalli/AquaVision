@@ -250,14 +250,14 @@ random_seed: 42
 export AQUAVISION_DATA_ROOT="/content/drive/MyDrive/oil_spill"
 export AQUAVISION_CONFIG="/content/drive/MyDrive/oil_spill/stage1_config.yaml"
 
-python -m ml.resnet.train \
+python -m ml.models.resnet18.train \
   --dataset-root $AQUAVISION_DATA_ROOT \
   --config $AQUAVISION_CONFIG
 ```
 
 Or programmatically:
 ```python
-from ml.resnet.train import train_resnet
+from ml.models.resnet18.train import train_resnet
 import os
 
 os.environ["AQUAVISION_DATA_ROOT"] = "/content/drive/MyDrive/oil_spill"
@@ -275,14 +275,14 @@ history = train_resnet(
 export AQUAVISION_DATA_ROOT="/content/drive/MyDrive/oil_spill"
 export AQUAVISION_CONFIG="/content/drive/MyDrive/oil_spill/stage1_config.yaml"
 
-python -m ml.unet.train \
+python -m ml.models.unet.train \
   --dataset-root $AQUAVISION_DATA_ROOT \
   --config $AQUAVISION_CONFIG
 ```
 
 Or programmatically:
 ```python
-from ml.unet.train import train_unet
+from ml.models.unet.train import train_unet
 import os
 
 os.environ["AQUAVISION_DATA_ROOT"] = "/content/drive/MyDrive/oil_spill"

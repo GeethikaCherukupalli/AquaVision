@@ -1,2 +1,2 @@
-Set-Location (Join-Path $PSScriptRoot '..')
-uvicorn backend.app:app --reload --port 8000
+Set-Location $PSScriptRoot
+uvicorn aquavision.app:app --reload --port 8000
