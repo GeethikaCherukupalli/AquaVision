@@ -3,4 +3,4 @@
 !.env.example
 .claude
 .venv
-.pytest_cache
+.pytest_cacheml/artifacts/
