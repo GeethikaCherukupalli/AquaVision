@@ -20,11 +20,11 @@ Sentinel-1 scene
 ## Backend
 
 ```bash
-cd AquaVision/aquavision-backend
+cd AquaVision
 python -m venv .venv
 . .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
-uvicorn aquavision.app:app --reload --host 0.0.0.0 --port 8000
+uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The backend exposes the analysis API, satellite product search, simulation status, and AIS candidates through FastAPI.
@@ -32,7 +32,7 @@ The backend exposes the analysis API, satellite product search, simulation statu
 ## Frontend
 
 ```bash
-cd AquaVision/aquavision-frontend
+cd AquaVision/frontend
 npm install
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
@@ -48,11 +48,14 @@ The ML code lives under the `ml` package. The system uses:
 
 ### Model artifact placement
 
-Place trained model files under `aquavision-backend/checkpoints/`:
+Place trained model files in a directory such as:
 
 ```text
-checkpoints/resnet18/resnet18_best_epoch06.pth
-checkpoints/unet/final-unet-checkpoint.pth
+artifacts/resnet18/latest.pth
+artifacts/resnet18/best.pth
+artifacts/resnet18/final.pth
+artifacts/unet/best.pth
+artifacts/unet/final.pth
 ```
 
 ## Environment variables
@@ -100,8 +103,8 @@ The AIS stage filters vessel trajectories by region and time, computes candidate
 ## Running demo mode
 
 ```bash
-cd AquaVision/aquavision-backend
-python -m uvicorn aquavision.app:app --reload --host 0.0.0.0 --port 8000
+cd AquaVision
+python -m uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Then call the API:
@@ -113,7 +116,7 @@ curl -X POST http://localhost:8000/api/v1/analysis -H 'Content-Type: application
 ## Running tests
 
 ```bash
-cd AquaVision/aquavision-backend
+cd AquaVision
 python -m pytest -q
 ```
 

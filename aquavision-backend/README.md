@@ -1,11 +1,11 @@
 # AquaVision backend
 
-This directory is the backend project boundary for the AquaVision frontend. It owns the FastAPI application, ML pipeline, service integrations, checkpoints, runtime data, and backend tests.
+This is the backend project boundary for the AquaVision frontend. The currently tested FastAPI implementation remains in the importable `backend/` package so existing Python tests and provider modules keep their stable imports.
 
 Run from the repository root:
 
 ```powershell
-uvicorn aquavision.app:app --reload --port 8000
+uvicorn backend.app:app --reload --port 8000
 ```
 
 The frontend uses these routes:
