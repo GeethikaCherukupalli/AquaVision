@@ -1,6 +1,10 @@
+import sys
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from backend.app import app
+sys.path.insert(0, str(Path(__file__).parents[1] / 'aquavision-backend'))
+from app import app
 
 
 client = TestClient(app)
@@ -12,23 +16,21 @@ def test_health_endpoint():
     assert response.json()['status'] == 'ok'
 
 
-def test_analysis_creation_demo_mode():
+def test_analysis_requires_real_scene():
     payload = {
         'mode': 'historical',
-        'description': 'demo historical run',
         'region': {'west': -9.0, 'south': 42.0, 'east': -7.0, 'north': 43.5},
         'sensor': 'sentinel-1',
+        'start_date': '2026-09-01',
+        'end_date': '2026-09-02',
+        'acquisition_id': 'sentinel-1-product',
+        'acquisition_time': '2026-09-01T00:00:00Z',
     }
     response = client.post('/api/v1/analysis', json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data['status'] in {'QUEUED', 'RUNNING', 'COMPLETED'}
-    assert 'job_id' in data
-    assert 'result' in data
+    assert response.status_code == 422
+    assert 'CDSE' in response.json()['detail']
 
-    lookup = client.get(f"/api/v1/analysis/{data['job_id']}")
-    assert lookup.status_code == 200
-    assert lookup.json()['job_id'] == data['job_id']
 
-    missing = client.get('/api/v1/analysis/unknown-job')
-    assert missing.status_code == 404
+def test_missing_analysis_returns_404():
+    response = client.get('/api/v1/analysis/unknown-job')
+    assert response.status_code == 404

@@ -30,8 +30,18 @@ class ResNetInference:
         self.classifier_threshold = classifier_threshold
 
         self.model = ResNet18Gate(pretrained=False).to(self.device)
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        self.model.load_state_dict(checkpoint["model_state_dict"])
+        # The committed checkpoint contains trusted optimizer/history metadata
+        # from training and requires the explicit legacy loader mode in PyTorch
+        # 2.6+; the model architecture and weights are unchanged.
+        checkpoint = torch.load(
+            checkpoint_path,
+            map_location=self.device,
+            weights_only=False,
+        )
+        state_dict = checkpoint["model_state_dict"]
+        if state_dict and all(key.startswith("module.") for key in state_dict):
+            state_dict = {key.removeprefix("module."): value for key, value in state_dict.items()}
+        self.model.load_state_dict(state_dict)
         self.model.eval()
 
         self.normalizer = normalizer or ChannelNormalizer()
@@ -53,8 +63,12 @@ class ResNetInference:
         list of Patch
             Candidate patches that passed the gate.
         """
+        candidate_patches = self.predict_all(scene)
+        return [patch for patch in candidate_patches if patch.is_candidate]
+
+    def predict_all(self, scene: np.ndarray) -> List[Patch]:
+        """Run inference and return every patch with its probability."""
         patches = self.patch_extractor.extract(scene, scene_id="scene", split="inference")
-        candidate_patches = []
 
         for patch in patches:
             image = patch.image.astype(np.float32)
@@ -67,10 +81,7 @@ class ResNetInference:
 
             patch.probability = probability
             patch.is_candidate = probability >= self.classifier_threshold
-            if patch.is_candidate:
-                candidate_patches.append(patch)
-
-        return candidate_patches
+        return patches
 
     @torch.no_grad()
     def predict_batch(

@@ -1,25 +1,21 @@
 # Implementation status
 
-Updated: 2026-09-16
+Updated: 2026-09-19
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Globe archive inspected | YES | Source files, package manifest, components, data, and styling inspected. |
-| Globe implementation integrated | YES | Adapted `globe.gl` component integrated into the existing `frontend/` app. |
-| Globe library identified | `globe.gl` + Three.js | Archive also used Leaflet/react-leaflet and satellite.js for separate views. |
-| Globe renders locally | YES | Vite startup and production build verified. Earth imagery requires network access. |
-| Globe interactions verified | PARTIAL | Orbit/zoom/pan controls are preserved; vessel point selection is wired. Browser pixel/interaction inspection is still pending. |
-| Backend data connected | PARTIAL | Readiness and analysis endpoints are connected; current analysis response is demo-only. |
-| Demo data clearly labelled | YES | Backend response has `demo_mode`; UI displays `DEMO MODE` and `DEMO DATA`. |
-| Hard-coded operational values removed | YES | Current dashboard metrics, vessels, tracks, and summaries derive from analysis state or show empty states. |
-| `npm run build` | PASS | Vite production build completed successfully after globe integration. |
+| Authoritative app roots | YES | `aquavision-backend/` and `aquavision-frontend/` are the only application roots. |
+| AOI selection | YES | Leaflet map supports navigation and drag-to-draw geographic bbox selection. |
+| Date selection | YES | Historical and monitoring workflows expose start/end date inputs. |
+| CDSE catalogue search | IMPLEMENTED | Search uses configured OAuth client credentials and returns actual products only. |
+| CDSE Processing API path | IMPLEMENTED | Selected acquisition window requests numerical VV/VH FLOAT32 GeoTIFF data. |
+| ResNet18 v1 API path | IMPLEMENTED | CDSE-processed VV/VH data is validated and passed to the committed checkpoint. |
+| Production frontend path | IMPLEMENTED | Demo execution was removed; UI requires AOI, acquisition, and real analysis inputs. |
+| `npm run build` | PASS | Active Vite frontend builds successfully. |
 
 ## Remaining blockers
 
-- The backend analysis route still invokes `DemoAnalysisEngine`.
-- Real ResNet18 and U-Net checkpoints are not present.
-- No real Sentinel-1 scene is configured.
-- CDSE, Copernicus Marine, and AIS credentials are not configured.
-- Open-Meteo, Copernicus Marine, and OpenDrift/OpenOil execution paths are incomplete.
-- The backend does not yet return satellite footprint/position or segmentation geometry layers.
-- The archive's static TLE and map fixture data were intentionally not migrated.
+- The training backscatter coefficient is not recorded; `CDSE_BACKSCATTER_COEFFICIENT` must be confirmed before a real production request is allowed.
+- No authenticated CDSE smoke test was run because credentials were unavailable.
+- The active environment has no `pytest`, `torch`, or `torchvision`, so model execution tests were not run.
+- U-Net, OpenDrift, AIS, and orbital satellite-position processing are not active production stages.

@@ -1,2 +1,3 @@
-Set-Location (Join-Path $PSScriptRoot '..')
-uvicorn backend.app:app --reload --port 8000
+Set-Location $PSScriptRoot
+$env:PYTHONPATH = Join-Path $PSScriptRoot '..'
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000

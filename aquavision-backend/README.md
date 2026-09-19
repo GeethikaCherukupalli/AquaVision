@@ -1,11 +1,29 @@
 # AquaVision backend
 
-This is the backend project boundary for the AquaVision frontend. The currently tested FastAPI implementation remains in the importable `backend/` package so existing Python tests and provider modules keep their stable imports.
+This is the authoritative FastAPI application for AquaVision.
 
-Run from the repository root:
+This is a Python/FastAPI service. Do not run `npm run dev` from this directory;
+there is intentionally no `package.json` here.
+
+Run from this directory. The root path is added so the shared `ml/` package and model artifacts remain available:
 
 ```powershell
-uvicorn backend.app:app --reload --port 8000
+$env:PYTHONPATH=".."
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
+```
+
+Or, from this directory, run:
+
+```powershell
+.\run.ps1
+```
+
+Run the React frontend separately from `aquavision-frontend`:
+
+```powershell
+cd ..\aquavision-frontend
+npm install
+npm run dev
 ```
 
 The frontend uses these routes:
@@ -14,7 +32,6 @@ The frontend uses these routes:
 - `POST /api/v1/analysis`
 - `GET /api/v1/analysis/{job_id}`
 - `POST /api/v1/satellites/search`
-- `POST /api/v1/simulations`
-- `POST /api/v1/ais/candidates`
+- `GET /api/v1/health`
 
-The frontend labels the current response as simulation data whenever production providers or artifacts are unavailable. Scientific processing remains owned by FastAPI and its provider/service modules; React only requests and visualizes the structured response.
+Processing requires `CDSE_BACKSCATTER_COEFFICIENT` to be explicitly set after training provenance confirms the coefficient. The service will not choose one automatically.

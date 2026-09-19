@@ -1,32 +1,51 @@
 # AquaVision API
 
-## Health
+The authoritative FastAPI application is `aquavision-backend/app.py`.
 
+## Health and readiness
+
+```text
 GET /api/v1/health
+GET /api/v1/readiness
+```
 
-## Analysis
+## Sentinel-1 catalogue search
 
-POST /api/v1/analysis
+```text
+POST /api/v1/satellites/search
+```
 
-Request body:
+Request fields:
+
 ```json
 {
-  "mode": "historical",
-  "description": "demo historical run",
-  "region": {"west": -9.0, "south": 42.0, "east": -7.0, "north": 43.5},
-  "sensor": "sentinel-1"
+  "region": {"west": 68.0, "south": 8.0, "east": 78.0, "north": 23.0},
+  "start_date": "2026-09-01",
+  "end_date": "2026-09-08"
 }
 ```
 
-## Satellite search
+The endpoint uses CDSE credentials from environment variables and returns only catalogue products returned by CDSE. Missing credentials or provider failures are errors; no products are fabricated.
 
-POST /api/v1/satellites/search
+## Stage-1 analysis
 
-## Simulations
+```text
+POST /api/v1/analysis
+GET  /api/v1/analysis/{job_id}
+```
 
-POST /api/v1/simulations
-GET /api/v1/simulations/{job_id}
+The request must include the selected AOI, date range, CDSE acquisition identifier, and the acquisition timestamp returned by catalogue search:
 
-## AIS candidates
+```json
+{
+  "mode": "historical",
+  "region": {"west": 68.0, "south": 8.0, "east": 78.0, "north": 23.0},
+  "start_date": "2026-09-01",
+  "end_date": "2026-09-08",
+  "acquisition_id": "CDSE_PRODUCT_ID",
+  "acquisition_time": "2026-09-04T04:12:00Z",
+  "acquisition_time": "2026-09-04T04:12:00Z"
+}
+```
 
-POST /api/v1/ais/candidates
+The response contains the computed ResNet18 v1 probability, threshold, candidate boolean, model metadata, selected acquisition timestamp, and AOI. Errors are never converted to `candidate: false`.

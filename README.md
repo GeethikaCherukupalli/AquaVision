@@ -1,38 +1,41 @@
 # AquaVision
 
-AquaVision is a prototype oil-spill detection and environmental reconstruction system. It combines SAR scene analysis, candidate detection, segmentation, probabilistic origin reconstruction, and AIS-based vessel correlation in a single operational workflow.
+AquaVision is an operational prototype for Sentinel-1 SAR oil-spill candidate detection. The current verified vertical slice is the ResNet18 v1 candidate gate; later segmentation, drift, and AIS modules remain separate prototype stages.
 
 ## Overview
 
-The system is designed to ingest Sentinel-1 SAR scenes, run a two-stage ML pipeline, estimate a probable origin region and time window, and then correlate candidate vessel tracks with the inferred spill origin. The current repository is a working prototype with a deterministic demo path and a production-oriented API boundary.
+The repository contains one authoritative backend under `aquavision-backend/` and one authoritative dashboard under `aquavision-frontend/`.
 
 ## Architecture summary
 
 ```text
-Sentinel-1 scene
-  -> Stage 1: ResNet gate + U-Net segmentation
-  -> Spill geometry + artifact exports
-  -> Stage 2: environmental reconstruction (OpenDrift/OpenOil, mock or real)
-  -> Stage 3: AIS candidate scoring
-  -> Operational dashboard
+Sentinel-1 VV/VH scene
+  -> 512x512 SAR validation and training normalization
+  -> ResNet18 v1 sigmoid probability
+  -> threshold 0.84
+  -> structured FastAPI result
+  -> React dashboard status
 ```
 
 ## Backend
 
 ```bash
-cd AquaVision
+cd AquaVision/aquavision-backend
 python -m venv .venv
 . .venv/bin/activate   # or .venv\Scripts\activate on Windows
-pip install -r requirements.txt
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+pip install -r ..\requirements.txt
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The backend exposes the analysis API, satellite product search, simulation status, and AIS candidates through FastAPI.
+The backend is Python/FastAPI and has no `package.json`. Do not run `npm run dev`
+from `aquavision-backend`; use the command above or `run.ps1`.
+
+The backend exposes health, readiness, CDSE catalogue search, and Stage-1 analysis through FastAPI.
 
 ## Frontend
 
 ```bash
-cd AquaVision/frontend
+cd AquaVision/aquavision-frontend
 npm install
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
@@ -48,81 +51,86 @@ The ML code lives under the `ml` package. The system uses:
 
 ### Model artifact placement
 
-Place trained model files in a directory such as:
+The committed production candidate artifact is:
 
 ```text
-artifacts/resnet18/latest.pth
-artifacts/resnet18/best.pth
-artifacts/resnet18/final.pth
-artifacts/unet/best.pth
-artifacts/unet/final.pth
+ml/artifacts/resnet18/v1/resnet18_best_epoch06.pth
+ml/artifacts/resnet18/v1/resnet18_metadata.json
+ml/artifacts/resnet18/v1/sar_normalization.json
 ```
+
+It expects a 2-band, 512x512 Sentinel-1-compatible scene in dB representation, ordered `VV`, `VH`. The trained normalization is loaded from metadata: VV mean/std `-32.184457 / 7.279350`, VH mean/std `-20.073348 / 5.797458`.
 
 ## Environment variables
 
 Copy `.env.example` to `.env` and fill values as needed.
 
-Required for production connectors:
-- `CDSE_USERNAME`
-- `CDSE_PASSWORD`
+CDSE production search uses:
+- `CDSE_CLIENT_ID`
+- `CDSE_CLIENT_SECRET`
+- `CDSE_TOKEN_URL`, `CDSE_CATALOG_URL`, `CDSE_PROCESS_URL`, `CDSE_COLLECTION`
+- `CDSE_BACKSCATTER_COEFFICIENT` (required; must be confirmed from training provenance)
 - `COPERNICUS_MARINE_USERNAME`
 - `COPERNICUS_MARINE_PASSWORD`
 - `AIS_USERNAME`
 - `AIS_PASSWORD`
 
-The demo path does not require external credentials.
+Analysis requires a real CDSE acquisition and a processed VV/VH scene. Missing credentials or data produce an explicit unavailable/error state.
 
 ## Sentinel-1 ingestion
 
-The repository includes a clean provider boundary for Sentinel-1 acquisition through the CDSE adapter. Production credentials are required for live retrieval. The system intentionally does not claim continuous satellite coverage.
+The CDSE adapter performs client-credential authentication and STAC catalog search through `POST /api/v1/satellites/search`. It does not fabricate products when credentials or the provider are unavailable. Monitoring is acquisition/revisit based, not continuous.
+
+Selected products are requested from `https://sh.dataspace.copernicus.eu/process/v1` as numerical two-band `FLOAT32` GeoTIFF output using the `sentinel-1-grd` collection, VV/VH bands, and dB units. The Processing API time range is a one-minute window around the CDSE-confirmed acquisition timestamp. The coefficient is not guessed because the repository does not record whether training used sigma0, beta0, gamma0, or gamma0 terrain.
 
 ## Stage 1
 
-The Stage 1 pipeline includes:
-- SAR input preprocessing
-- patch extraction
-- ResNet candidate gate
-- U-Net segmentation
-- scene reconstruction
-- geometry extraction
-- output artifact writes
+The production API validates the selected AOI, dates, and acquisition identifier against CDSE, requests the selected acquisition window from the Processing API, loads ResNet18 v1, applies the saved normalization, computes `sigmoid(logit)`, and returns `candidate = probability >= 0.84`. Missing input, model, or preprocessing errors return an analysis failure, not a no-candidate result.
 
-## Stage 2
+## Future stages
 
-Environmental reconstruction uses a provider/service boundary for:
-- ocean currents from Copernicus Marine
-- weather from Open-Meteo
-- OpenDrift/OpenOil hindcast and forecast simulation
+Stage 2 OpenDrift reconstruction and Stage 3 AIS correlation are not connected to the active application and are not shown as completed analysis.
 
-If external data are unavailable, the system falls back to clearly labeled demo/mock behavior.
+## API
 
-## Stage 3
-
-The AIS stage filters vessel trajectories by region and time, computes candidate correlations, and assigns a score from 0–100.
-
-## Running demo mode
-
-```bash
-cd AquaVision
-python -m uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+```text
+POST /api/v1/analysis          Run production Stage-1 analysis
+GET  /api/v1/analysis/{job_id} Retrieve an analysis job
+POST /api/v1/satellites/search Search Sentinel-1 products through CDSE
+GET  /api/v1/readiness         Report artifact/provider readiness
 ```
 
-Then call the API:
+Production example:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/analysis -H 'Content-Type: application/json' -d '{"mode":"historical","description":"demo run","sensor":"sentinel-1"}'
+```json
+{"mode":"historical","execution_mode":"production","scene_path":"data/fixtures/scene.tif","sensor":"sentinel-1"}
 ```
 
-## Running tests
+## Running an analysis
 
 ```bash
-cd AquaVision
+cd aquavision-backend
+$env:PYTHONPATH=".."
+python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
+```
+
+Use the frontend to draw an AOI, select dates, search CDSE acquisitions, select a returned product, and run Stage 1.
+
+## Testing
+
+```bash
 python -m pytest -q
+cd aquavision-frontend
+npm run build
 ```
 
-## Limitations
+The ResNet tests require the project environment with `torch`, `torchvision`, and `pytest` installed. The committed checkpoint is not a fabricated fixture; it is the v1 candidate artifact.
 
-- Live provider execution requires configured credentials.
-- OpenDrift/OpenOil requires the appropriate runtime dependencies and may not be installed in all dev environments.
-- The demo analysis is intentionally deterministic and clearly marked as DEMO data.
+## Implemented and not implemented
+
+- Implemented: AOI rectangle selection, date range selection, CDSE catalogue search and revalidation, CDSE Processing API numerical VV/VH request, dB/unit validation, ResNet18 v1 inference, actual raster previews, and visible result/error states.
+- Blocked pending provenance: the training coefficient (sigma0, beta0, gamma0, or gamma0 terrain) is not recorded, so `CDSE_BACKSCATTER_COEFFICIENT` is required and no default is guessed.
+- The current environment used for this handoff did not contain `torch`/`pytest`, so checkpoint execution still needs to be run in the project environment.
+- No authenticated CDSE smoke test was performed because credentials were unavailable.
+- U-Net production integration, OpenDrift production integration, AIS attribution, and super-resolution are not part of this vertical slice.
 - This is a prototype and requires domain validation before real operational use.
